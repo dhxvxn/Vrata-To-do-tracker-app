@@ -1,20 +1,43 @@
-<div align="center">
-<img width="1200" height="475" alt="GHBanner" src="https://github.com/user-attachments/assets/0aa67016-6eaf-458a-adb2-6e31a0763ed6" />
-</div>
+# ✅ Vrata — To‑Do & Habit Tracker
 
-# Run and deploy your AI Studio app
+A React + TypeScript productivity app that mixes a task tracker, a habit/routine
+scheduler, an exam calendar, and even a running‑training planner — with AI‑generated
+insights on your progress via the Gemini API.
 
-This contains everything you need to run your app locally.
+---
 
-View your app in AI Studio: https://ai.studio/apps/drive/1P7GvCzSmXx1IiuCze1yqGkoqBY9FjFdl
+## ✨ Features
+- **Tasks with frequencies** — daily, weekly, monthly, exam, or running routines
+- **Scheduling** — schedule tasks to specific dates and mark completion over time
+- **Exam calendar** — colour‑coded exam events to plan study around
+- **Running planner** — tempo / interval / long / easy / recovery run types
+- **Progress tracking** — completion‑rate history you can visualise
+- **AI insights** — Gemini generates feedback on your progress trends
 
-## Run Locally
+## 🛠 Tech Stack
+React · TypeScript · Vite · Google Gemini API
 
-**Prerequisites:**  Node.js
+---
 
+## 🚀 Run locally
 
-1. Install dependencies:
-   `npm install`
-2. Set the `GEMINI_API_KEY` in [.env.local](.env.local) to your Gemini API key
-3. Run the app:
-   `npm run dev`
+**Prerequisites:** Node.js
+
+```bash
+git clone https://github.com/dhxvxn/Vrata-To-do-tracker-app.git
+cd Vrata-To-do-tracker-app
+npm install
+```
+
+Set your Gemini key in `.env.local`:
+```env
+GEMINI_API_KEY=your_gemini_key
+```
+
+Start the dev server:
+```bash
+npm run dev
+```
+
+## 👨‍💻 Author
+**Dhavan** — CSE student
