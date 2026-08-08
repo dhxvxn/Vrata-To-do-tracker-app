@@ -1,6 +1,6 @@
-// Thin wrapper around the browser-native Web Speech API (SpeechRecognition for
-// speech-to-text, SpeechSynthesis for spoken replies). No external service or
-// key required. Best support is Chrome/Edge; degrades gracefully elsewhere.
+// Thin wrapper around the browser-native SpeechRecognition API for dictating
+// text into form fields. No external service or key required. Best support is
+// Chrome / Edge (desktop + Android); iOS Safari support is partial.
 
 type SpeechRecognitionCtor = new () => any;
 
@@ -8,8 +8,6 @@ const getRecognitionCtor = (): SpeechRecognitionCtor | undefined =>
   (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
 
 export const isSpeechRecognitionSupported = (): boolean => !!getRecognitionCtor();
-export const isSpeechSynthesisSupported = (): boolean =>
-  typeof window !== 'undefined' && 'speechSynthesis' in window;
 
 export interface RecognitionHandlers {
   onResult: (transcript: string) => void;
@@ -56,19 +54,3 @@ export const createRecognition = (handlers: RecognitionHandlers): RecognitionCon
     },
   };
 };
-
-/** Speak text aloud. No-op if synthesis is unavailable. */
-export const speak = (text: string): void => {
-  if (!isSpeechSynthesisSupported() || !text) return;
-  try {
-    window.speechSynthesis.cancel();
-    const utterance = new SpeechSynthesisUtterance(text);
-    utterance.rate = 1.02;
-    utterance.pitch = 1;
-    window.speechSynthesis.speak(utterance);
-  } catch {
-    /* ignore synthesis errors */
-  }
-};
-
-export const isVoiceSupported = (): boolean => isSpeechRecognitionSupported();

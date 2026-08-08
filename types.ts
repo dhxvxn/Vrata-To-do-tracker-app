@@ -44,26 +44,6 @@ export interface InsightState {
   error: string | null;
 }
 
-// ---- Voice assistant ----
-
-export type VoiceIntentType =
-  | 'ADD_TASK'
-  | 'COMPLETE_TASK'
-  | 'DELETE_TASK'
-  | 'QUERY_SCHEDULE'
-  | 'QUERY_TASKS'
-  | 'UNKNOWN';
-
-// Structured result of parsing a spoken command with Gemini.
-export interface VoiceCommandResult {
-  intent: VoiceIntentType;
-  title?: string;
-  frequency?: TaskFrequency;
-  details?: string;
-  date?: string; // YYYY-MM-DD, when the user specified one
-  reply: string; // short spoken confirmation / answer
-}
-
 // Optional extra fields TaskInput can pass through onAdd (e.g. a YouTube link).
 export interface TaskExtras {
   youtubeUrl?: string;

@@ -1,19 +1,66 @@
 
 import { GoogleGenAI } from "@google/genai";
-import { Task, TaskFrequency, VoiceCommandResult, VoiceIntentType } from "../types";
+import { Task, TaskFrequency } from "../types";
 
 const MODEL = 'gemini-3-flash-preview';
 
 // Read the key from Vite env (VITE_GEMINI_API_KEY), falling back to a legacy
-// process.env value if one was injected. Kept in one place so every call uses
-// the same resolution.
+// process.env value if one was injected. The key is OPTIONAL — without it the
+// app falls back to a locally-generated insight.
 const getApiKey = (): string | undefined =>
   import.meta.env.VITE_GEMINI_API_KEY ||
   (typeof process !== 'undefined' ? (process as any).env?.API_KEY : undefined);
 
 export const isGeminiConfigured = (): boolean => !!getApiKey();
 
+// A keyless, templated insight built purely from the user's own stats. Used when
+// no Gemini key is configured (i.e. the default, free experience) and as the
+// fallback if the API call fails.
+export const buildLocalInsight = (tasks: Task[]): string => {
+  if (tasks.length === 0) {
+    return 'A clean slate. Define one target and begin. Momentum follows the first move.';
+  }
+
+  const total = tasks.length;
+  const completed = tasks.filter(t => t.completed).length;
+  const rate = Math.round((completed / total) * 100);
+
+  const byFreq = (f: TaskFrequency) => {
+    const list = tasks.filter(t => t.frequency === f);
+    return { total: list.length, done: list.filter(t => t.completed).length };
+  };
+  const exam = byFreq(TaskFrequency.EXAM);
+  const study = byFreq(TaskFrequency.STUDY);
+
+  // Find the category dragging completion down the most.
+  const categories: { name: string; total: number; done: number }[] = [
+    { name: 'daily', ...byFreq(TaskFrequency.DAILY) },
+    { name: 'weekly', ...byFreq(TaskFrequency.WEEKLY) },
+    { name: 'monthly', ...byFreq(TaskFrequency.MONTHLY) },
+    { name: 'exam', ...exam },
+    { name: 'study', ...study },
+  ].filter(c => c.total > 0);
+
+  const laggard = categories
+    .map(c => ({ ...c, pct: c.done / c.total }))
+    .sort((a, b) => a.pct - b.pct)[0];
+
+  if (exam.total > 0 && exam.done < exam.total) {
+    return `Exam season is live: ${exam.total - exam.done} of ${exam.total} prep tasks remain. Discipline now compounds later. Hold the line.`;
+  }
+  if (rate >= 80) {
+    return `${rate}% cleared. Execution is sharp — protect the streak and resist complacency.`;
+  }
+  if (laggard && laggard.pct < 0.5) {
+    return `Your ${laggard.name} targets are lagging at ${Math.round(laggard.pct * 100)}%. Concentrate force there before starting anything new.`;
+  }
+  return `${completed} of ${total} done — ${rate}% overall. Steady, not spectacular. Close the open loops one at a time.`;
+};
+
 export const getProductivityInsight = async (tasks: Task[]): Promise<string> => {
+  // Free default: no key means a locally-generated insight, no network call.
+  if (!getApiKey()) return buildLocalInsight(tasks);
+
   try {
     const ai = new GoogleGenAI({ apiKey: getApiKey() });
 
@@ -47,86 +94,9 @@ export const getProductivityInsight = async (tasks: Task[]): Promise<string> => 
       `,
     });
 
-    return response.text || "Focus on the essential. Completion is the only metric.";
+    return response.text || buildLocalInsight(tasks);
   } catch (error) {
     console.error("Gemini API Error:", error);
-    return "Unable to analyze patterns at this moment. Keep moving forward.";
-  }
-};
-
-export interface VoiceContext {
-  activeTabLabel: string;
-  taskTitles: string[];
-}
-
-const VALID_INTENTS: VoiceIntentType[] = [
-  'ADD_TASK', 'COMPLETE_TASK', 'DELETE_TASK', 'QUERY_SCHEDULE', 'QUERY_TASKS', 'UNKNOWN',
-];
-const VALID_FREQUENCIES = Object.values(TaskFrequency);
-
-/**
- * Turn a raw voice transcript into a structured command the app can execute.
- * Uses Gemini with a JSON response; falls back to UNKNOWN on any error so the
- * assistant always has something safe to say.
- */
-export const parseVoiceCommand = async (
-  transcript: string,
-  context: VoiceContext
-): Promise<VoiceCommandResult> => {
-  const fallback: VoiceCommandResult = {
-    intent: 'UNKNOWN',
-    reply: "Sorry, I didn't catch that. Try 'add a daily task to ...' or 'what's on my schedule'.",
-  };
-
-  if (!getApiKey()) {
-    return {
-      intent: 'UNKNOWN',
-      reply: 'Voice commands need a Gemini API key. Add VITE_GEMINI_API_KEY to your .env.local.',
-    };
-  }
-
-  try {
-    const ai = new GoogleGenAI({ apiKey: getApiKey() });
-    const today = new Date().toISOString().split('T')[0];
-
-    const prompt = `You are the command parser for "Vrata", a to-do and study tracker.
-Today's date is ${today}. The user is viewing the "${context.activeTabLabel}" section.
-Existing task titles the user might refer to: ${context.taskTitles.slice(0, 40).map(t => `"${t}"`).join(', ') || '(none)'}.
-
-The user said (via speech): "${transcript}"
-
-Decide what they want and respond with ONLY a JSON object (no markdown, no code fences) with these fields:
-- "intent": one of ADD_TASK, COMPLETE_TASK, DELETE_TASK, QUERY_SCHEDULE, QUERY_TASKS, UNKNOWN
-- "title": for ADD/COMPLETE/DELETE, the task title (for COMPLETE/DELETE match an existing title above when possible)
-- "frequency": for ADD_TASK, one of DAILY, WEEKLY, MONTHLY, EXAM, RUNNING, STUDY (infer from wording; default DAILY)
-- "details": optional extra detail for ADD_TASK
-- "date": optional YYYY-MM-DD if the user named a specific day
-- "reply": a short, friendly spoken confirmation or answer (one sentence, no emojis)
-
-Guidance: "study", "watch", "youtube", "lecture", "revise a topic" -> STUDY. "run", "km", "jog", "tempo" -> RUNNING. "exam", "test prep" -> EXAM. Questions about calendar/agenda/meetings -> QUERY_SCHEDULE. Questions about what's left/to-do today -> QUERY_TASKS.`;
-
-    const response = await ai.models.generateContent({
-      model: MODEL,
-      contents: prompt,
-      config: { responseMimeType: 'application/json' },
-    });
-
-    const raw = (response.text || '').trim().replace(/^```json\s*/i, '').replace(/```$/,'').trim();
-    const parsed = JSON.parse(raw);
-
-    const intent: VoiceIntentType = VALID_INTENTS.includes(parsed.intent) ? parsed.intent : 'UNKNOWN';
-    const frequency = VALID_FREQUENCIES.includes(parsed.frequency) ? parsed.frequency as TaskFrequency : undefined;
-
-    return {
-      intent,
-      title: typeof parsed.title === 'string' ? parsed.title.trim() : undefined,
-      frequency,
-      details: typeof parsed.details === 'string' && parsed.details.trim() ? parsed.details.trim() : undefined,
-      date: typeof parsed.date === 'string' ? parsed.date.trim() : undefined,
-      reply: typeof parsed.reply === 'string' && parsed.reply.trim() ? parsed.reply.trim() : fallback.reply,
-    };
-  } catch (error) {
-    console.error('parseVoiceCommand error:', error);
-    return fallback;
+    return buildLocalInsight(tasks);
   }
 };

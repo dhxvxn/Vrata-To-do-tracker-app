@@ -21,8 +21,7 @@ import {
   BookOpen,
   Loader2
 } from 'lucide-react';
-import { v4 as uuidv4 } from 'uuid';
-import { Task, TaskFrequency, InsightState, ExamEvent, RunType, TaskExtras, VoiceCommandResult } from './types';
+import { Task, TaskFrequency, InsightState, RunType, TaskExtras } from './types';
 import { TaskInput } from './components/TaskInput';
 import { ProgressChart } from './components/ProgressChart';
 import { CategoryBarChart } from './components/AnalyticsCharts';
@@ -30,12 +29,13 @@ import { ExamCalendar } from './components/ExamCalendar';
 import { RunSelector } from './components/RunSelector';
 import { StudyCard } from './components/StudyCard';
 import { CalendarView } from './components/CalendarView';
-import { VoiceAssistant } from './components/VoiceAssistant';
+import { AuthControl } from './components/AuthControl';
 import { getProductivityInsight } from './services/geminiService';
 import { useTasks } from './hooks/useTasks';
+import { useAuth } from './hooks/useAuth';
 import { parseYouTubeId } from './utils/youtube';
 import { isGoogleConfigured } from './services/googleAuthService';
-import { createEventFromTask, summarizeUpcoming } from './services/calendarService';
+import { createEventFromTask } from './services/calendarService';
 
 const RUN_TYPE_COLORS: Record<RunType, string> = {
   TEMPO: '#ef4444',
@@ -50,20 +50,18 @@ const RUN_TYPE_COLORS: Record<RunType, string> = {
 const DAYS_OF_WEEK = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 
 function App() {
+  const auth = useAuth();
+
   const {
     tasks,
+    examEvents,
     createTask,
     toggleTask,
     deleteTask,
     updateTask,
-    completeTaskByTitle,
-    deleteTaskByTitle,
-  } = useTasks();
-
-  const [examEvents, setExamEvents] = useState<ExamEvent[]>(() => {
-    const saved = localStorage.getItem('vrata_exam_events');
-    return saved ? JSON.parse(saved) : [];
-  });
+    pinExam,
+    syncing,
+  } = useTasks(auth.user);
 
   const [activeTab, setActiveTab] = useState<TaskFrequency>(TaskFrequency.DAILY);
   const [showAnalytics, setShowAnalytics] = useState(false);
@@ -87,11 +85,8 @@ function App() {
   const [deferredPrompt, setDeferredPrompt] = useState<any>(null);
   const [showInstallBtn, setShowInstallBtn] = useState(false);
 
-  // Task state, persistence and the recurring-task reset now live in useTasks().
-
-  useEffect(() => {
-    localStorage.setItem('vrata_exam_events', JSON.stringify(examEvents));
-  }, [examEvents]);
+  // Task/exam state, persistence, cross-device sync and the recurring-task reset
+  // all live in useTasks().
 
   useEffect(() => {
     const handler = (e: any) => {
@@ -181,36 +176,6 @@ function App() {
     } finally {
       setSyncingId(null);
     }
-  };
-
-  // ---- Voice assistant wiring ----
-  const activeViewLabel = showAnalytics ? 'Analytics'
-    : showHistory ? 'History'
-    : showCalendar ? 'Schedule'
-    : `${activeTab.charAt(0) + activeTab.slice(1).toLowerCase()}`;
-
-  const handleVoiceAdd = (result: VoiceCommandResult) => {
-    handleAddTask(
-      result.title || 'Untitled task',
-      result.frequency ?? TaskFrequency.DAILY,
-      result.details,
-      undefined,
-      result.date,
-    );
-  };
-
-  const getTasksSummary = () => {
-    const active = tasks.filter(t => !t.completed);
-    if (active.length === 0) return 'You have no open tasks. Nicely done.';
-    const daily = active.filter(t => t.frequency === TaskFrequency.DAILY);
-    const scope = daily.length ? daily : active;
-    const titles = scope.slice(0, 5).map(t => t.title).join(', ');
-    return `You have ${active.length} open ${active.length === 1 ? 'task' : 'tasks'}. ${daily.length ? 'Today' : 'Up next'}: ${titles}.`;
-  };
-
-  const handlePinExam = (title: string, date: string, color: string) => {
-    const newEvent: ExamEvent = { id: uuidv4(), title, date, color };
-    setExamEvents(prev => [...prev.filter(e => e.date !== date), newEvent]);
   };
 
   const filteredTasks = useMemo(() => {
@@ -425,6 +390,18 @@ function App() {
             <History size={18} />
             History
           </button>
+
+          <div className="pt-2 mt-2 border-t border-border">
+            <AuthControl
+              configured={auth.configured}
+              user={auth.user}
+              loading={auth.loading}
+              syncing={syncing}
+              error={auth.error}
+              onSignIn={auth.signInWithGoogle}
+              onSignOut={auth.signOut}
+            />
+          </div>
         </div>
       </aside>
 
@@ -577,7 +554,7 @@ function App() {
               {(activeTab === TaskFrequency.EXAM || (activeTab === TaskFrequency.RUNNING && runningEditorMode !== 'NONE')) && (
                 <div className="lg:col-span-2 space-y-4 animate-in slide-in-from-left-4 duration-300">
                   {activeTab === TaskFrequency.EXAM && (
-                    <ExamCalendar selectedDate={selectedExamDate} onSelectDate={setSelectedExamDate} examEvents={examEvents} tasks={tasks} onPinExam={handlePinExam} />
+                    <ExamCalendar selectedDate={selectedExamDate} onSelectDate={setSelectedExamDate} examEvents={examEvents} tasks={tasks} onPinExam={pinExam} />
                   )}
                   {activeTab === TaskFrequency.RUNNING && runningEditorMode !== 'NONE' && (
                     <>
@@ -659,16 +636,6 @@ function App() {
           </div>
         )}
       </main>
-
-      <VoiceAssistant
-        activeTabLabel={activeViewLabel}
-        taskTitles={tasks.filter(t => !t.completed).map(t => t.title)}
-        onAddTask={handleVoiceAdd}
-        onCompleteTask={completeTaskByTitle}
-        onDeleteTask={deleteTaskByTitle}
-        getTasksSummary={getTasksSummary}
-        getScheduleSummary={isGoogleConfigured() ? summarizeUpcoming : undefined}
-      />
     </div>
   );
 }

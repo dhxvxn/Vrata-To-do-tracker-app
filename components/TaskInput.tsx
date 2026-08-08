@@ -1,8 +1,9 @@
 
-import React, { useState } from 'react';
-import { Plus, AlignLeft, Youtube } from 'lucide-react';
+import React, { useMemo, useRef, useState } from 'react';
+import { Plus, AlignLeft, Youtube, Mic } from 'lucide-react';
 import { TaskFrequency, TaskExtras } from '../types';
 import { parseYouTubeId } from '../utils/youtube';
+import { createRecognition, isSpeechRecognitionSupported, RecognitionController } from '../services/voiceService';
 
 interface TaskInputProps {
   onAdd: (title: string, frequency: TaskFrequency, details?: string, extras?: TaskExtras) => void;
@@ -14,9 +15,27 @@ export const TaskInput: React.FC<TaskInputProps> = ({ onAdd, selectedFrequency }
   const [details, setDetails] = useState('');
   const [showDetails, setShowDetails] = useState(false);
   const [youtubeUrl, setYoutubeUrl] = useState('');
+  const [listening, setListening] = useState(false);
+  const controllerRef = useRef<RecognitionController | null>(null);
+
+  const voiceSupported = useMemo(() => isSpeechRecognitionSupported(), []);
 
   const isStudy = selectedFrequency === TaskFrequency.STUDY;
   const youtubeInvalid = isStudy && youtubeUrl.trim().length > 0 && !parseYouTubeId(youtubeUrl);
+
+  // Dictate speech straight into the title field — pure browser speech-to-text.
+  const toggleDictation = () => {
+    if (listening) { controllerRef.current?.stop(); setListening(false); return; }
+    const controller = createRecognition({
+      onResult: (transcript) => {
+        setText(prev => (prev.trim() ? `${prev.trim()} ${transcript}` : transcript));
+      },
+      onError: () => setListening(false),
+      onEnd: () => setListening(false),
+    });
+    controllerRef.current = controller;
+    if (controller) { setListening(true); controller.start(); }
+  };
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -52,6 +71,17 @@ export const TaskInput: React.FC<TaskInputProps> = ({ onAdd, selectedFrequency }
           placeholder={getPlaceholder()}
           className="flex-1 bg-transparent border-none text-textMain px-4 py-3 focus:ring-0 placeholder-zinc-600 outline-none text-sm sm:text-base"
         />
+
+        {voiceSupported && (
+          <button
+            type="button"
+            onClick={toggleDictation}
+            className={`p-3 transition-colors ${listening ? 'text-red-500 animate-pulse' : 'text-zinc-600 hover:text-zinc-400'}`}
+            title={listening ? 'Listening… tap to stop' : 'Dictate by voice'}
+          >
+            <Mic size={18} />
+          </button>
+        )}
 
         <button
           type="button"
