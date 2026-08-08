@@ -10,6 +10,19 @@ export enum TaskFrequency {
 
 export type FitnessType = 'TEMPO' | 'INTERVAL' | 'LONG' | 'EASY_RECOVERY' | 'UPPER_BODY' | 'LOWER_BODY' | 'CORE_ABS' | 'NONE';
 
+export type Priority = 'HIGH' | 'MEDIUM' | 'LOW';
+
+export interface SubTask {
+  id: string;
+  title: string;
+  done: boolean;
+}
+
+export interface WorkoutSet {
+  reps: number;
+  weight: number; // kg
+}
+
 export interface Task {
   id: string;
   title: string;
@@ -23,6 +36,19 @@ export interface Task {
   googleEventId?: string; // Google Calendar event id, once synced
   youtubeUrl?: string; // Original YouTube link for STUDY tasks
   youtubeVideoId?: string; // Parsed YouTube video id for thumbnail/embed
+  priority?: Priority; // Task power-ups
+  tags?: string[];
+  subtasks?: SubTask[];
+  sets?: WorkoutSet[]; // Workout logging for FITNESS tasks
+}
+
+// A logged Pomodoro/focus block. Stored alongside tasks and synced.
+export interface FocusSession {
+  id: string;
+  date: string; // ISO Date string
+  minutes: number;
+  taskId?: string;
+  label?: string;
 }
 
 export interface ExamEvent {
@@ -52,4 +78,6 @@ export interface Quote {
 // Optional extra fields TaskInput can pass through onAdd (e.g. a YouTube link).
 export interface TaskExtras {
   youtubeUrl?: string;
+  priority?: Priority;
+  tags?: string[];
 }

@@ -19,23 +19,34 @@ import {
   CalendarClock,
   BookOpen,
   Loader2,
-  Box
+  Box,
+  Search
 } from 'lucide-react';
-import { Task, TaskFrequency, FitnessType, Quote, TaskExtras } from './types';
+import { Task, TaskFrequency, FitnessType, Quote, TaskExtras, Priority, SubTask, WorkoutSet } from './types';
 import { TaskInput } from './components/TaskInput';
 import { ProgressChart } from './components/ProgressChart';
-import { CategoryBarChart } from './components/AnalyticsCharts';
+import { CategoryBarChart, FocusChart } from './components/AnalyticsCharts';
 import { ExamCalendar } from './components/ExamCalendar';
 import { FitnessSelector } from './components/FitnessSelector';
 import { StudyCard } from './components/StudyCard';
 import { CalendarView } from './components/CalendarView';
 import { AuthControl } from './components/AuthControl';
+import { StreakBadge } from './components/StreakBadge';
+import { Heatmap } from './components/Heatmap';
+import { FocusTimer } from './components/FocusTimer';
+import { ExamCountdown } from './components/ExamCountdown';
+import { WorkoutLog } from './components/WorkoutLog';
+import { SubtaskList } from './components/SubtaskList';
 import { getDailyQuote, generateWrappedReport } from './services/geminiService';
 import { useTasks } from './hooks/useTasks';
 import { useAuth } from './hooks/useAuth';
 import { parseYouTubeId } from './utils/youtube';
 import { isGoogleConfigured } from './services/googleAuthService';
 import { createEventFromTask } from './services/calendarService';
+import { computeStreak, computeXP, earnedBadges } from './utils/stats';
+
+const PRIORITY_COLORS: Record<Priority, string> = { HIGH: '#ef4444', MEDIUM: '#f59e0b', LOW: '#3b82f6' };
+const priorityRank = (p?: Priority) => (p === 'HIGH' ? 0 : p === 'MEDIUM' ? 1 : p === 'LOW' ? 2 : 3);
 
 const FITNESS_COLORS: Record<FitnessType, string> = {
   TEMPO: '#ef4444',
@@ -55,13 +66,20 @@ function App() {
   const {
     tasks,
     examEvents,
+    focusSessions,
     createTask,
     toggleTask,
     deleteTask,
     updateTask,
     pinExam,
+    addFocusSession,
     syncing,
   } = useTasks(auth.user);
+
+  const [query, setQuery] = useState('');
+  const streak = useMemo(() => computeStreak(tasks), [tasks]);
+  const xp = useMemo(() => computeXP(tasks), [tasks]);
+  const badges = useMemo(() => earnedBadges(tasks), [tasks]);
 
   const [activeTab, setActiveTab] = useState<TaskFrequency>(TaskFrequency.DAILY);
   const [showAnalytics, setShowAnalytics] = useState(false);
@@ -138,8 +156,18 @@ function App() {
       runType: frequency === TaskFrequency.FITNESS ? selectedFitnessType : undefined,
       youtubeUrl,
       youtubeVideoId,
+      priority: extras?.priority,
+      tags: extras?.tags,
     });
   };
+
+  // Search filter (title + tags) and priority sort for task lists.
+  const matchesQuery = (t: Task) => {
+    const q = query.trim().toLowerCase();
+    if (!q) return true;
+    return t.title.toLowerCase().includes(q) || (t.tags || []).some(tag => tag.toLowerCase().includes(q));
+  };
+  const byPriority = (a: Task, b: Task) => priorityRank(a.priority) - priorityRank(b.priority);
 
   // Push a scheduled task to Google Calendar and remember the event id.
   const handleSyncTask = async (task: Task) => {
@@ -204,8 +232,11 @@ function App() {
             {task.completed ? <CheckCircle2 size={22} className="text-zinc-500" /> : <Circle size={22} className="text-zinc-400" />}
           </button>
           <div className="flex flex-col">
-            <span className={`text-sm sm:text-base ${task.completed ? 'text-zinc-600 line-through' : 'text-zinc-200'}`}>{task.title}</span>
-            <div className="flex items-center gap-2 mt-1">
+            <span className={`text-sm sm:text-base flex items-center gap-2 ${task.completed ? 'text-zinc-600 line-through' : 'text-zinc-200'}`}>
+              {task.priority && <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ backgroundColor: PRIORITY_COLORS[task.priority] }} title={`${task.priority} priority`} />}
+              {task.title}
+            </span>
+            <div className="flex items-center gap-2 mt-1 flex-wrap">
               <span className="text-[8px] uppercase tracking-widest text-zinc-600 font-bold bg-zinc-900 px-1.5 py-0.5 rounded">
                 {task.frequency}
               </span>
@@ -214,6 +245,9 @@ function App() {
                   {task.runType.replace('_', ' ')}
                 </span>
               )}
+              {task.tags && task.tags.map(tag => (
+                <span key={tag} className="text-[8px] text-zinc-400 bg-zinc-900 px-1.5 py-0.5 rounded">#{tag}</span>
+              ))}
               {task.completedAt && (
                 <span className="text-[8px] text-zinc-700 font-mono flex items-center gap-1">
                   <Clock size={8} /> {new Date(task.completedAt).toLocaleDateString()}
@@ -250,6 +284,10 @@ function App() {
           ))}
         </div>
       )}
+      {!task.completed && <SubtaskList task={task} onUpdate={(subtasks: SubTask[]) => updateTask(task.id, { subtasks })} />}
+      {task.frequency === TaskFrequency.FITNESS && !task.completed && (
+        <WorkoutLog task={task} onUpdate={(sets: WorkoutSet[]) => updateTask(task.id, { sets })} />
+      )}
     </div>
   );
 
@@ -273,6 +311,15 @@ function App() {
           </div>
           <h1 className="text-xl font-bold tracking-tight">VRATA</h1>
         </div>
+        <div className="relative">
+          <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-600" />
+          <input
+            value={query}
+            onChange={e => setQuery(e.target.value)}
+            placeholder="Search tasks…"
+            className="w-full bg-surface border border-border rounded-lg pl-9 pr-3 py-2 text-xs text-zinc-200 placeholder-zinc-600 outline-none focus:border-textMuted"
+          />
+        </div>
         <nav className="flex flex-col gap-1">
           {sidebarTabs.map(tab => (
             <button
@@ -290,7 +337,8 @@ function App() {
           <button onClick={() => resetViews(() => setShowHistory(true))} className={`flex items-center gap-3 px-4 py-3 rounded-lg text-sm font-medium ${showHistory ? 'bg-surfaceHighlight text-white' : 'text-textMuted hover:text-white'}`}><History size={18} /> History</button>
           <button onClick={() => resetViews(() => setShowWrapped(true))} className={`flex items-center gap-3 px-4 py-3 rounded-lg text-sm font-medium ${showWrapped ? 'bg-surfaceHighlight text-white' : 'text-textMuted hover:text-white'}`}><Box size={18} /> Wrapped</button>
 
-          <div className="pt-2 mt-1 border-t border-border">
+          <div className="pt-2 mt-1 border-t border-border space-y-2">
+            <StreakBadge streak={streak} xp={xp} />
             <AuthControl
               configured={auth.configured}
               user={auth.user}
@@ -357,8 +405,24 @@ function App() {
           </div>
         ) : showAnalytics ? (
           <div className="space-y-8 animate-in fade-in duration-500">
+            <Heatmap tasks={tasks} />
             <ProgressChart data={progressData} />
-            <CategoryBarChart data={sidebarTabs.map(t => ({ name: t.label, total: tasks.filter(tk => tk.frequency === t.id).length, completed: tasks.filter(tk => tk.frequency === t.id && tk.completed).length }))} />
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+              <CategoryBarChart data={sidebarTabs.map(t => ({ name: t.label, total: tasks.filter(tk => tk.frequency === t.id).length, completed: tasks.filter(tk => tk.frequency === t.id && tk.completed).length }))} />
+              <FocusChart sessions={focusSessions} />
+            </div>
+            <div>
+              <h3 className="text-sm font-medium text-textMuted uppercase tracking-widest mb-4">Badges</h3>
+              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
+                {badges.map(b => (
+                  <div key={b.id} className={`p-4 rounded-lg border text-center ${b.earned ? 'bg-surface border-border' : 'bg-transparent border-zinc-900 opacity-40'}`}>
+                    <div className="text-2xl mb-1">{b.earned ? '🏅' : '🔒'}</div>
+                    <div className="text-xs text-zinc-200 font-medium">{b.label}</div>
+                    <div className="text-[10px] text-zinc-500 mt-1 leading-tight">{b.description}</div>
+                  </div>
+                ))}
+              </div>
+            </div>
           </div>
         ) : showHistory ? (
           <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
@@ -374,6 +438,7 @@ function App() {
           </div>
         ) : (
           <div className="space-y-6">
+            {activeTab === TaskFrequency.EXAM && <ExamCountdown examEvents={examEvents} />}
             <div className="grid grid-cols-1 lg:grid-cols-5 gap-8">
               {(activeTab === TaskFrequency.EXAM || (activeTab === TaskFrequency.FITNESS && fitnessEditorMode !== 'NONE')) && (
                 <div className="lg:col-span-2 space-y-4">
@@ -386,26 +451,29 @@ function App() {
                 {(activeTab !== TaskFrequency.FITNESS || fitnessEditorMode !== 'NONE') && <TaskInput onAdd={handleAddTask} selectedFrequency={activeTab} />}
                 <div className="space-y-8">
                   {activeTab === TaskFrequency.FITNESS ? (
-                    [1, 2, 3, 4, 5, 6, 0].map(dayIdx => (
-                      <div key={dayIdx} className="space-y-2">
-                        <div className="flex items-center gap-3"><span className={`text-[10px] uppercase font-bold tracking-[0.2em] ${new Date().getDay() === dayIdx ? 'text-white' : 'text-zinc-600'}`}>{DAYS_OF_WEEK[dayIdx]}</span><div className="flex-1 h-px bg-zinc-900" /></div>
-                        {fitnessTasksGrouped[dayIdx].length === 0 ? <div className="p-3 text-[10px] text-zinc-800 italic border border-dashed border-zinc-900 rounded-lg">No session planned.</div> : fitnessTasksGrouped[dayIdx].map(renderTask)}
-                      </div>
-                    ))
+                    [1, 2, 3, 4, 5, 6, 0].map(dayIdx => {
+                      const dayTasks = fitnessTasksGrouped[dayIdx].filter(matchesQuery);
+                      return (
+                        <div key={dayIdx} className="space-y-2">
+                          <div className="flex items-center gap-3"><span className={`text-[10px] uppercase font-bold tracking-[0.2em] ${new Date().getDay() === dayIdx ? 'text-white' : 'text-zinc-600'}`}>{DAYS_OF_WEEK[dayIdx]}</span><div className="flex-1 h-px bg-zinc-900" /></div>
+                          {dayTasks.length === 0 ? <div className="p-3 text-[10px] text-zinc-800 italic border border-dashed border-zinc-900 rounded-lg">No session planned.</div> : dayTasks.map(renderTask)}
+                        </div>
+                      );
+                    })
                   ) : activeTab === TaskFrequency.STUDY ? (
-                    tasks.filter(t => t.frequency === TaskFrequency.STUDY && !t.completed).length === 0 ? (
+                    tasks.filter(t => t.frequency === TaskFrequency.STUDY && !t.completed && matchesQuery(t)).length === 0 ? (
                       <div className="text-center py-20 text-zinc-700 font-light border border-dashed border-border rounded-lg">
-                        No study sessions yet. Add a topic and paste a YouTube link to begin.
+                        {query ? 'No study sessions match your search.' : 'No study sessions yet. Add a topic and paste a YouTube link to begin.'}
                       </div>
                     ) : (
                       <div className="space-y-2">
-                        {tasks.filter(t => t.frequency === TaskFrequency.STUDY && !t.completed).map(task => (
+                        {tasks.filter(t => t.frequency === TaskFrequency.STUDY && !t.completed && matchesQuery(t)).sort(byPriority).map(task => (
                           <StudyCard key={task.id} task={task} onToggle={toggleTask} onDelete={deleteTask} />
                         ))}
                       </div>
                     )
                   ) : (
-                    tasks.filter(t => t.frequency === activeTab && !t.completed).map(renderTask)
+                    tasks.filter(t => t.frequency === activeTab && !t.completed && matchesQuery(t)).sort(byPriority).map(renderTask)
                   )}
                 </div>
               </div>
@@ -413,6 +481,11 @@ function App() {
           </div>
         )}
       </main>
+
+      <FocusTimer
+        studyTasks={tasks.filter(t => t.frequency === TaskFrequency.STUDY && !t.completed).map(t => ({ id: t.id, title: t.title }))}
+        onLogSession={addFocusSession}
+      />
     </div>
   );
 }

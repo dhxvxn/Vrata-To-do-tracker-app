@@ -2,11 +2,12 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { v4 as uuidv4 } from 'uuid';
 import type { User } from 'firebase/auth';
 import { doc, onSnapshot, setDoc } from 'firebase/firestore';
-import { Task, TaskFrequency, ExamEvent } from '../types';
+import { Task, TaskFrequency, ExamEvent, FocusSession, Priority } from '../types';
 import { db, isFirebaseConfigured } from '../services/firebase';
 
 const TASKS_KEY = 'vrata_tasks';
 const EXAMS_KEY = 'vrata_exam_events';
+const FOCUS_KEY = 'vrata_focus_sessions';
 
 export interface NewTaskInput {
   title: string;
@@ -16,6 +17,8 @@ export interface NewTaskInput {
   runType?: Task['runType'];
   youtubeUrl?: string;
   youtubeVideoId?: string;
+  priority?: Priority;
+  tags?: string[];
 }
 
 const load = <T,>(key: string): T[] => {
@@ -27,7 +30,7 @@ const load = <T,>(key: string): T[] => {
   }
 };
 
-// Merge two id-keyed lists (remote wins on conflict), newest tasks first.
+// Merge two id-keyed lists (remote wins on conflict).
 const unionById = <T extends { id: string }>(remote: T[], local: T[]): T[] => {
   const map = new Map<string, T>();
   local.forEach(i => map.set(i.id, i));
@@ -39,24 +42,26 @@ const sortByCreated = (tasks: Task[]): Task[] =>
   [...tasks].sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
 
 /**
- * Owns tasks + exam events: localStorage persistence, the recurring-task reset,
- * all CRUD, and — when a Firebase user is signed in — real-time cross-device
- * sync via a single Firestore document `users/{uid}`. Signed out (or Firebase
- * unconfigured) it behaves exactly like the original localStorage-only app.
+ * Owns tasks + exam events + focus sessions: localStorage persistence, the
+ * recurring-task reset, all CRUD, and — when a Firebase user is signed in —
+ * real-time cross-device sync via a single Firestore document `users/{uid}`.
+ * Signed out (or Firebase unconfigured) it behaves like the localStorage-only app.
  */
 export function useTasks(user?: User | null) {
   const configured = isFirebaseConfigured();
   const [tasks, setTasks] = useState<Task[]>(() => load<Task>(TASKS_KEY));
   const [examEvents, setExamEvents] = useState<ExamEvent[]>(() => load<ExamEvent>(EXAMS_KEY));
+  const [focusSessions, setFocusSessions] = useState<FocusSession[]>(() => load<FocusSession>(FOCUS_KEY));
   const [syncing, setSyncing] = useState(false);
 
   const tasksRef = useRef(tasks); tasksRef.current = tasks;
   const examsRef = useRef(examEvents); examsRef.current = examEvents;
+  const focusRef = useRef(focusSessions); focusRef.current = focusSessions;
   const lastSyncedRef = useRef<string>('');       // JSON we last wrote/received
   const initializedUidRef = useRef<string | null>(null);
   const writeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // Reset recurring tasks whose period rolled over; drop stale running tasks.
+  // Reset recurring tasks whose period rolled over; drop stale fitness tasks.
   useEffect(() => {
     const now = new Date();
     const todayStr = now.toISOString().split('T')[0];
@@ -105,26 +110,34 @@ export function useTasks(user?: User | null) {
     const unsub = onSnapshot(ref, snap => {
       if (initializedUidRef.current !== user.uid) {
         // First snapshot for this user: merge whatever is local with the cloud
-        // once, so signing in never loses local tasks.
+        // once, so signing in never loses local data.
         initializedUidRef.current = user.uid;
-        const remoteTasks: Task[] = snap.exists() ? (snap.data().tasks || []) : [];
-        const remoteExams: ExamEvent[] = snap.exists() ? (snap.data().examEvents || []) : [];
-        const mergedTasks = sortByCreated(unionById(remoteTasks, tasksRef.current));
-        const mergedExams = unionById(remoteExams, examsRef.current);
-        lastSyncedRef.current = JSON.stringify({ tasks: mergedTasks, examEvents: mergedExams });
+        const rTasks: Task[] = snap.exists() ? (snap.data().tasks || []) : [];
+        const rExams: ExamEvent[] = snap.exists() ? (snap.data().examEvents || []) : [];
+        const rFocus: FocusSession[] = snap.exists() ? (snap.data().focusSessions || []) : [];
+        const mergedTasks = sortByCreated(unionById(rTasks, tasksRef.current));
+        const mergedExams = unionById(rExams, examsRef.current);
+        const mergedFocus = unionById(rFocus, focusRef.current);
+        lastSyncedRef.current = JSON.stringify({ tasks: mergedTasks, examEvents: mergedExams, focusSessions: mergedFocus });
         setTasks(mergedTasks);
         setExamEvents(mergedExams);
-        setDoc(ref, { tasks: mergedTasks, examEvents: mergedExams, updatedAt: Date.now() }, { merge: true })
+        setFocusSessions(mergedFocus);
+        setDoc(ref, { tasks: mergedTasks, examEvents: mergedExams, focusSessions: mergedFocus, updatedAt: Date.now() }, { merge: true })
           .catch(err => console.error('Sync seed failed:', err));
       } else {
         // Later updates: the cloud is the source of truth. Skip our own echoes.
         if (snap.metadata.hasPendingWrites) return;
-        const remote = { tasks: (snap.data()?.tasks || []) as Task[], examEvents: (snap.data()?.examEvents || []) as ExamEvent[] };
+        const remote = {
+          tasks: (snap.data()?.tasks || []) as Task[],
+          examEvents: (snap.data()?.examEvents || []) as ExamEvent[],
+          focusSessions: (snap.data()?.focusSessions || []) as FocusSession[],
+        };
         const payload = JSON.stringify(remote);
         if (payload === lastSyncedRef.current) return;
         lastSyncedRef.current = payload;
         setTasks(remote.tasks);
         setExamEvents(remote.examEvents);
+        setFocusSessions(remote.focusSessions);
       }
       setSyncing(false);
     }, err => { console.error('Sync error:', err); setSyncing(false); });
@@ -137,20 +150,21 @@ export function useTasks(user?: User | null) {
   useEffect(() => {
     localStorage.setItem(TASKS_KEY, JSON.stringify(tasks));
     localStorage.setItem(EXAMS_KEY, JSON.stringify(examEvents));
+    localStorage.setItem(FOCUS_KEY, JSON.stringify(focusSessions));
 
     if (!user || !configured || !db) return;
     if (initializedUidRef.current !== user.uid) return; // wait for initial merge
 
-    const payload = JSON.stringify({ tasks, examEvents });
+    const payload = JSON.stringify({ tasks, examEvents, focusSessions });
     if (payload === lastSyncedRef.current) return;
     lastSyncedRef.current = payload;
 
     if (writeTimer.current) clearTimeout(writeTimer.current);
     writeTimer.current = setTimeout(() => {
-      setDoc(doc(db!, 'users', user.uid), { tasks, examEvents, updatedAt: Date.now() }, { merge: true })
+      setDoc(doc(db!, 'users', user.uid), { tasks, examEvents, focusSessions, updatedAt: Date.now() }, { merge: true })
         .catch(err => console.error('Sync write failed:', err));
     }, 500);
-  }, [tasks, examEvents, user, configured]);
+  }, [tasks, examEvents, focusSessions, user, configured]);
 
   const createTask = useCallback((input: NewTaskInput): Task => {
     const newTask: Task = {
@@ -164,6 +178,8 @@ export function useTasks(user?: User | null) {
       runType: input.runType,
       youtubeUrl: input.youtubeUrl,
       youtubeVideoId: input.youtubeVideoId,
+      priority: input.priority,
+      tags: input.tags && input.tags.length ? input.tags : undefined,
     };
     setTasks(prev => [newTask, ...prev]);
     return newTask;
@@ -189,14 +205,23 @@ export function useTasks(user?: User | null) {
     setExamEvents(prev => [...prev.filter(e => e.date !== date), { id: uuidv4(), title, date, color }]);
   }, []);
 
+  const addFocusSession = useCallback((minutes: number, taskId?: string, label?: string) => {
+    setFocusSessions(prev => [
+      { id: uuidv4(), date: new Date().toISOString(), minutes, taskId, label },
+      ...prev,
+    ]);
+  }, []);
+
   return {
     tasks,
     examEvents,
+    focusSessions,
     createTask,
     toggleTask,
     deleteTask,
     updateTask,
     pinExam,
+    addFocusSession,
     syncing,
   };
 }
