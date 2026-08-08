@@ -1,10 +1,12 @@
 
-import React, { useState } from 'react';
-import { Plus, ChevronDown, ChevronUp, AlignLeft } from 'lucide-react';
-import { TaskFrequency } from '../types';
+import React, { useMemo, useRef, useState } from 'react';
+import { Plus, AlignLeft, Youtube, Mic } from 'lucide-react';
+import { TaskFrequency, TaskExtras } from '../types';
+import { parseYouTubeId } from '../utils/youtube';
+import { createRecognition, isSpeechRecognitionSupported, RecognitionController } from '../services/voiceService';
 
 interface TaskInputProps {
-  onAdd: (title: string, frequency: TaskFrequency, details?: string) => void;
+  onAdd: (title: string, frequency: TaskFrequency, details?: string, extras?: TaskExtras) => void;
   selectedFrequency: TaskFrequency;
 }
 
@@ -12,15 +14,37 @@ export const TaskInput: React.FC<TaskInputProps> = ({ onAdd, selectedFrequency }
   const [text, setText] = useState('');
   const [details, setDetails] = useState('');
   const [showDetails, setShowDetails] = useState(false);
+  const [youtubeUrl, setYoutubeUrl] = useState('');
+  const [listening, setListening] = useState(false);
+  const controllerRef = useRef<RecognitionController | null>(null);
+
+  const voiceSupported = useMemo(() => isSpeechRecognitionSupported(), []);
+
+  const isStudy = selectedFrequency === TaskFrequency.STUDY;
+  const youtubeInvalid = isStudy && youtubeUrl.trim().length > 0 && !parseYouTubeId(youtubeUrl);
+
+  // Dictate speech straight into the title field — pure browser speech-to-text.
+  const toggleDictation = () => {
+    if (listening) { controllerRef.current?.stop(); setListening(false); return; }
+    const controller = createRecognition({
+      onResult: (transcript) => setText(prev => (prev.trim() ? `${prev.trim()} ${transcript}` : transcript)),
+      onError: () => setListening(false),
+      onEnd: () => setListening(false),
+    });
+    controllerRef.current = controller;
+    if (controller) { setListening(true); controller.start(); }
+  };
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (text.trim()) {
-      onAdd(text, selectedFrequency, details.trim() || undefined);
-      setText('');
-      setDetails('');
-      if (selectedFrequency !== TaskFrequency.FITNESS) setShowDetails(false);
-    }
+    if (!text.trim() || youtubeInvalid) return;
+    const extras: TaskExtras | undefined =
+      isStudy && youtubeUrl.trim() ? { youtubeUrl: youtubeUrl.trim() } : undefined;
+    onAdd(text, selectedFrequency, details.trim() || undefined, extras);
+    setText('');
+    setDetails('');
+    setYoutubeUrl('');
+    if (selectedFrequency !== TaskFrequency.FITNESS) setShowDetails(false);
   };
 
   const getPlaceholder = () => {
@@ -30,6 +54,7 @@ export const TaskInput: React.FC<TaskInputProps> = ({ onAdd, selectedFrequency }
       case TaskFrequency.DAILY: return "Main focus today?";
       case TaskFrequency.WEEKLY: return "Weekly milestone...";
       case TaskFrequency.MONTHLY: return "Big picture objective...";
+      case TaskFrequency.STUDY: return "What are you studying? (e.g. Calculus – Limits)";
       default: return "Add task...";
     }
   };
@@ -44,7 +69,29 @@ export const TaskInput: React.FC<TaskInputProps> = ({ onAdd, selectedFrequency }
           placeholder={getPlaceholder()}
           className="flex-1 bg-transparent border-none text-textMain px-4 py-3 focus:ring-0 placeholder-zinc-600 outline-none text-sm sm:text-base"
         />
-        
+
+        <button
+          type="button"
+          onClick={toggleDictation}
+          disabled={!voiceSupported}
+          className={`p-3 transition-colors ${
+            !voiceSupported
+              ? 'text-zinc-700 cursor-not-allowed'
+              : listening
+                ? 'text-red-500 animate-pulse'
+                : 'text-zinc-400 hover:text-white'
+          }`}
+          title={
+            !voiceSupported
+              ? 'Voice input works in Chrome or Edge'
+              : listening
+                ? 'Listening… tap to stop'
+                : 'Add a task by voice'
+          }
+        >
+          <Mic size={18} />
+        </button>
+
         <button
           type="button"
           onClick={() => setShowDetails(!showDetails)}
@@ -57,11 +104,38 @@ export const TaskInput: React.FC<TaskInputProps> = ({ onAdd, selectedFrequency }
         <button
           type="submit"
           className="p-3 text-zinc-500 hover:text-white transition-colors disabled:opacity-30"
-          disabled={!text.trim()}
+          disabled={!text.trim() || youtubeInvalid}
         >
           <Plus size={20} />
         </button>
       </div>
+
+      {voiceSupported && (
+        listening ? (
+          <p className="flex items-center gap-2 text-[11px] text-red-400 px-1">
+            <span className="w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse" />
+            Listening… speak your task now.
+          </p>
+        ) : (
+          <p className="text-[11px] text-zinc-600 px-1">🎤 Tap the mic to add a task by voice.</p>
+        )
+      )}
+
+      {isStudy && (
+        <div className="animate-in slide-in-from-top-2 duration-300">
+          <div className={`flex items-center bg-surface border rounded-lg overflow-hidden transition-colors ${youtubeInvalid ? 'border-red-500/50' : 'border-border focus-within:border-textMuted'}`}>
+            <span className="pl-3 text-zinc-600"><Youtube size={18} /></span>
+            <input
+              type="text"
+              value={youtubeUrl}
+              onChange={(e) => setYoutubeUrl(e.target.value)}
+              placeholder="Paste a YouTube link (optional)"
+              className="flex-1 bg-transparent border-none text-textMain px-3 py-2.5 focus:ring-0 placeholder-zinc-600 outline-none text-xs sm:text-sm"
+            />
+          </div>
+          {youtubeInvalid && <p className="text-[10px] text-red-400 mt-1 px-1">That doesn't look like a valid YouTube link.</p>}
+        </div>
+      )}
 
       {(showDetails || selectedFrequency === TaskFrequency.FITNESS) && (
         <div className="animate-in slide-in-from-top-2 duration-300">

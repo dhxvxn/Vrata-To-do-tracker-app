@@ -1,32 +1,41 @@
 
 import React, { useState, useEffect, useMemo } from 'react';
-import { 
-  CheckCircle2, 
-  Circle, 
-  Trash2, 
-  BarChart3, 
-  Sparkles,
+import {
+  CheckCircle2,
+  Circle,
+  Trash2,
+  BarChart3,
   Calendar,
   CalendarDays,
   CalendarRange,
   Flame,
-  Download,
   GraduationCap,
   Activity,
   History,
   Clock,
   Edit2,
   CalendarPlus,
+  CalendarCheck,
+  CalendarClock,
+  BookOpen,
+  Loader2,
   Box
 } from 'lucide-react';
-import { v4 as uuidv4 } from 'uuid';
-import { Task, TaskFrequency, InsightState, ExamEvent, FitnessType, Quote } from './types';
+import { Task, TaskFrequency, FitnessType, Quote, TaskExtras } from './types';
 import { TaskInput } from './components/TaskInput';
 import { ProgressChart } from './components/ProgressChart';
 import { CategoryBarChart } from './components/AnalyticsCharts';
 import { ExamCalendar } from './components/ExamCalendar';
 import { FitnessSelector } from './components/FitnessSelector';
-import { getProductivityInsight, getDailyQuote, generateWrappedReport } from './services/geminiService';
+import { StudyCard } from './components/StudyCard';
+import { CalendarView } from './components/CalendarView';
+import { AuthControl } from './components/AuthControl';
+import { getDailyQuote, generateWrappedReport } from './services/geminiService';
+import { useTasks } from './hooks/useTasks';
+import { useAuth } from './hooks/useAuth';
+import { parseYouTubeId } from './utils/youtube';
+import { isGoogleConfigured } from './services/googleAuthService';
+import { createEventFromTask } from './services/calendarService';
 
 const FITNESS_COLORS: Record<FitnessType, string> = {
   TEMPO: '#ef4444',
@@ -42,62 +51,59 @@ const FITNESS_COLORS: Record<FitnessType, string> = {
 const DAYS_OF_WEEK = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 
 function App() {
-  const [tasks, setTasks] = useState<Task[]>(() => {
-    const saved = localStorage.getItem('vrata_tasks');
-    return saved ? JSON.parse(saved) : [];
-  });
+  const auth = useAuth();
+  const {
+    tasks,
+    examEvents,
+    createTask,
+    toggleTask,
+    deleteTask,
+    updateTask,
+    pinExam,
+    syncing,
+  } = useTasks(auth.user);
 
-  const [examEvents, setExamEvents] = useState<ExamEvent[]>(() => {
-    const saved = localStorage.getItem('vrata_exam_events');
-    return saved ? JSON.parse(saved) : [];
-  });
-  
   const [activeTab, setActiveTab] = useState<TaskFrequency>(TaskFrequency.DAILY);
   const [showAnalytics, setShowAnalytics] = useState(false);
   const [showHistory, setShowHistory] = useState(false);
   const [showWrapped, setShowWrapped] = useState(false);
-  
+  const [showCalendar, setShowCalendar] = useState(false);
+  const [syncingId, setSyncingId] = useState<string | null>(null);
+
   const [fitnessEditorMode, setFitnessEditorMode] = useState<'NONE' | 'THIS_WEEK' | 'NEXT_WEEK'>('NONE');
   const [selectedExamDate, setSelectedExamDate] = useState<Date>(() => {
-    const d = new Date(); d.setHours(0,0,0,0); return d;
+    const d = new Date(); d.setHours(0, 0, 0, 0); return d;
   });
   const [selectedFitnessDay, setSelectedFitnessDay] = useState<number>(new Date().getDay());
   const [selectedFitnessType, setSelectedFitnessType] = useState<FitnessType>('NONE');
-  
-  const [insight, setInsight] = useState<InsightState>({ loading: false, content: null, error: null });
-  const [quote, setQuote] = useState<Quote | null>(null);
-  const [wrappedReport, setWrappedReport] = useState<{ month: string | null; year: string | null }>({ month: null, year: null });
 
-  // Determine quote category based on current view
-  const quoteCategory = useMemo(() => {
-    if (activeTab === TaskFrequency.EXAM) return 'EXAM';
+  const [quote, setQuote] = useState<Quote | null>(null);
+  const [wrappedReport, setWrappedReport] = useState<{ month: string | null }>({ month: null });
+
+  const quoteCategory = useMemo<'GENERAL' | 'EXAM' | 'FITNESS'>(() => {
+    if (activeTab === TaskFrequency.EXAM || activeTab === TaskFrequency.STUDY) return 'EXAM';
     if (activeTab === TaskFrequency.FITNESS) return 'FITNESS';
     return 'GENERAL';
   }, [activeTab]);
 
   useEffect(() => {
-    const fetchDailyData = async () => {
-      const q = await getDailyQuote(quoteCategory);
-      setQuote(q);
-    };
-    fetchDailyData();
+    let active = true;
+    getDailyQuote(quoteCategory).then(q => { if (active) setQuote(q); });
+    return () => { active = false; };
   }, [quoteCategory]);
 
   useEffect(() => {
-    localStorage.setItem('vrata_tasks', JSON.stringify(tasks));
-  }, [tasks]);
-
-  useEffect(() => {
     if (showWrapped && !wrappedReport.month) {
-      const generateReport = async () => {
-        const m = await generateWrappedReport(tasks, 'MONTH');
-        setWrappedReport(prev => ({ ...prev, month: m }));
-      };
-      generateReport();
+      generateWrappedReport(tasks, 'MONTH').then(m => setWrappedReport({ month: m }));
     }
-  }, [showWrapped, tasks]);
+  }, [showWrapped, tasks, wrappedReport.month]);
 
-  const addTask = (title: string, frequency: TaskFrequency, details?: string) => {
+  const resetViews = (setter: () => void) => {
+    setShowAnalytics(false); setShowHistory(false); setShowWrapped(false); setShowCalendar(false);
+    setter();
+  };
+
+  const handleAddTask = (title: string, frequency: TaskFrequency, details?: string, extras?: TaskExtras) => {
     const now = new Date();
     let scheduledDate: string | undefined;
 
@@ -117,24 +123,36 @@ function App() {
       scheduledDate = finalDate.toISOString().split('T')[0];
     }
 
-    const newTask: Task = {
-      id: uuidv4(),
+    let youtubeUrl: string | undefined;
+    let youtubeVideoId: string | undefined;
+    if (frequency === TaskFrequency.STUDY && extras?.youtubeUrl) {
+      youtubeUrl = extras.youtubeUrl;
+      youtubeVideoId = parseYouTubeId(extras.youtubeUrl) || undefined;
+    }
+
+    createTask({
       title,
-      details,
-      completed: false,
       frequency,
-      createdAt: now.toISOString(),
+      details,
       scheduledDate,
-      runType: frequency === TaskFrequency.FITNESS ? selectedFitnessType : undefined
-    };
-    setTasks(prev => [newTask, ...prev]);
+      runType: frequency === TaskFrequency.FITNESS ? selectedFitnessType : undefined,
+      youtubeUrl,
+      youtubeVideoId,
+    });
   };
 
-  const toggleTask = (id: string) => {
-    setTasks(prev => prev.map(t => t.id === id ? { ...t, completed: !t.completed, completedAt: !t.completed ? new Date().toISOString() : undefined } : t));
+  // Push a scheduled task to Google Calendar and remember the event id.
+  const handleSyncTask = async (task: Task) => {
+    try {
+      setSyncingId(task.id);
+      const eventId = await createEventFromTask(task);
+      updateTask(task.id, { googleEventId: eventId });
+    } catch (e) {
+      console.error('Calendar sync failed:', e);
+    } finally {
+      setSyncingId(null);
+    }
   };
-
-  const deleteTask = (id: string) => setTasks(prev => prev.filter(t => t.id !== id));
 
   const fitnessTasksGrouped = useMemo(() => {
     const grouped: Record<number, Task[]> = {};
@@ -144,7 +162,7 @@ function App() {
     const thisMonday = new Date(now);
     const diff = now.getDate() - day + (day === 0 ? -6 : 1);
     thisMonday.setDate(diff);
-    thisMonday.setHours(0,0,0,0);
+    thisMonday.setHours(0, 0, 0, 0);
     const nextMonday = new Date(thisMonday);
     nextMonday.setDate(thisMonday.getDate() + 7);
 
@@ -157,15 +175,12 @@ function App() {
     return grouped;
   }, [tasks]);
 
-  const allCompletedTasks = useMemo(() => {
-    return tasks
-      .filter(t => t.completed)
-      .sort((a, b) => {
-        const dateA = a.completedAt ? new Date(a.completedAt).getTime() : 0;
-        const dateB = b.completedAt ? new Date(b.completedAt).getTime() : 0;
-        return dateB - dateA;
-      });
-  }, [tasks]);
+  const allCompletedTasks = useMemo(() =>
+    tasks.filter(t => t.completed).sort((a, b) => {
+      const dateA = a.completedAt ? new Date(a.completedAt).getTime() : 0;
+      const dateB = b.completedAt ? new Date(b.completedAt).getTime() : 0;
+      return dateB - dateA;
+    }), [tasks]);
 
   const progressData = useMemo(() => {
     const dates = Array.from({ length: 7 }, (_, i) => {
@@ -200,14 +215,30 @@ function App() {
                 </span>
               )}
               {task.completedAt && (
-                 <span className="text-[8px] text-zinc-700 font-mono flex items-center gap-1">
-                   <Clock size={8} /> {new Date(task.completedAt).toLocaleDateString()}
-                 </span>
+                <span className="text-[8px] text-zinc-700 font-mono flex items-center gap-1">
+                  <Clock size={8} /> {new Date(task.completedAt).toLocaleDateString()}
+                </span>
               )}
             </div>
           </div>
         </div>
-        <button onClick={() => deleteTask(task.id)} className="text-zinc-600 hover:text-red-400 opacity-0 group-hover:opacity-100 p-2"><Trash2 size={16} /></button>
+        <div className="flex items-center">
+          {isGoogleConfigured() && task.scheduledDate && !task.completed && (
+            task.googleEventId ? (
+              <span className="text-emerald-500/70 p-2" title="On Google Calendar"><CalendarCheck size={16} /></span>
+            ) : (
+              <button
+                onClick={() => handleSyncTask(task)}
+                disabled={syncingId === task.id}
+                className="text-zinc-600 hover:text-white opacity-0 group-hover:opacity-100 p-2 disabled:opacity-40"
+                title="Add to Google Calendar"
+              >
+                {syncingId === task.id ? <Loader2 size={16} className="animate-spin" /> : <CalendarPlus size={16} />}
+              </button>
+            )
+          )}
+          <button onClick={() => deleteTask(task.id)} className="text-zinc-600 hover:text-red-400 opacity-0 group-hover:opacity-100 p-2"><Trash2 size={16} /></button>
+        </div>
       </div>
       {task.details && !task.completed && (
         <div className="ml-10 mt-2 space-y-1">
@@ -227,8 +258,11 @@ function App() {
     { id: TaskFrequency.WEEKLY, icon: CalendarDays, label: 'Weekly' },
     { id: TaskFrequency.MONTHLY, icon: CalendarRange, label: 'Monthly' },
     { id: TaskFrequency.EXAM, icon: GraduationCap, label: 'Exam' },
-    { id: TaskFrequency.FITNESS, icon: Activity, label: 'Fitness' }
+    { id: TaskFrequency.FITNESS, icon: Activity, label: 'Fitness' },
+    { id: TaskFrequency.STUDY, icon: BookOpen, label: 'Studies' }
   ];
+
+  const inTaskView = !showAnalytics && !showHistory && !showWrapped && !showCalendar;
 
   return (
     <div className="min-h-screen bg-black text-textMain flex flex-col md:flex-row">
@@ -243,22 +277,35 @@ function App() {
           {sidebarTabs.map(tab => (
             <button
               key={tab.id}
-              onClick={() => { setActiveTab(tab.id); setShowAnalytics(false); setShowHistory(false); setShowWrapped(false); }}
-              className={`flex items-center gap-3 px-4 py-3 rounded-lg text-sm font-medium transition-all ${activeTab === tab.id && !showAnalytics && !showHistory && !showWrapped ? 'bg-white text-black' : 'text-textMuted hover:text-white hover:bg-surfaceHighlight'}`}
+              onClick={() => resetViews(() => setActiveTab(tab.id))}
+              className={`flex items-center gap-3 px-4 py-3 rounded-lg text-sm font-medium transition-all ${activeTab === tab.id && inTaskView ? 'bg-white text-black' : 'text-textMuted hover:text-white hover:bg-surfaceHighlight'}`}
             >
               <tab.icon size={18} /> {tab.label}
             </button>
           ))}
         </nav>
         <div className="mt-auto pt-6 flex flex-col gap-1 border-t border-border">
-          <button onClick={() => { setShowAnalytics(true); setShowHistory(false); setShowWrapped(false); }} className={`flex items-center gap-3 px-4 py-3 rounded-lg text-sm font-medium ${showAnalytics ? 'bg-surfaceHighlight text-white' : 'text-textMuted hover:text-white'}`}><BarChart3 size={18} /> Analytics</button>
-          <button onClick={() => { setShowHistory(true); setShowAnalytics(false); setShowWrapped(false); }} className={`flex items-center gap-3 px-4 py-3 rounded-lg text-sm font-medium ${showHistory ? 'bg-surfaceHighlight text-white' : 'text-textMuted hover:text-white'}`}><History size={18} /> History</button>
-          <button onClick={() => { setShowWrapped(true); setShowAnalytics(false); setShowHistory(false); }} className={`flex items-center gap-3 px-4 py-3 rounded-lg text-sm font-medium ${showWrapped ? 'bg-surfaceHighlight text-white' : 'text-textMuted hover:text-white'}`}><Box size={18} /> Wrapped</button>
+          <button onClick={() => resetViews(() => setShowCalendar(true))} className={`flex items-center gap-3 px-4 py-3 rounded-lg text-sm font-medium ${showCalendar ? 'bg-surfaceHighlight text-white' : 'text-textMuted hover:text-white'}`}><CalendarClock size={18} /> Schedule</button>
+          <button onClick={() => resetViews(() => setShowAnalytics(true))} className={`flex items-center gap-3 px-4 py-3 rounded-lg text-sm font-medium ${showAnalytics ? 'bg-surfaceHighlight text-white' : 'text-textMuted hover:text-white'}`}><BarChart3 size={18} /> Analytics</button>
+          <button onClick={() => resetViews(() => setShowHistory(true))} className={`flex items-center gap-3 px-4 py-3 rounded-lg text-sm font-medium ${showHistory ? 'bg-surfaceHighlight text-white' : 'text-textMuted hover:text-white'}`}><History size={18} /> History</button>
+          <button onClick={() => resetViews(() => setShowWrapped(true))} className={`flex items-center gap-3 px-4 py-3 rounded-lg text-sm font-medium ${showWrapped ? 'bg-surfaceHighlight text-white' : 'text-textMuted hover:text-white'}`}><Box size={18} /> Wrapped</button>
+
+          <div className="pt-2 mt-1 border-t border-border">
+            <AuthControl
+              configured={auth.configured}
+              user={auth.user}
+              loading={auth.loading}
+              syncing={syncing}
+              error={auth.error}
+              onSignIn={auth.signInWithGoogle}
+              onSignOut={auth.signOut}
+            />
+          </div>
         </div>
       </aside>
 
       <main className="flex-1 p-6 md:p-12 overflow-y-auto max-w-5xl mx-auto w-full">
-        {quote && !showWrapped && (
+        {quote && inTaskView && (
           <div className="mb-12 animate-in fade-in duration-700">
             <p className="text-xl md:text-2xl font-light italic text-zinc-400 leading-relaxed">"{quote.text}"</p>
             <p className="text-xs uppercase tracking-[0.3em] text-zinc-600 mt-4">— {quote.author}</p>
@@ -268,10 +315,15 @@ function App() {
         <header className="mb-10 flex flex-col sm:flex-row sm:items-end justify-between gap-6">
           <div>
             <h2 className="text-3xl font-light text-white tracking-tight">
-              {showWrapped ? 'Vrata Wrapped' : showAnalytics ? 'Analytics' : showHistory ? 'Completed Log' : `${activeTab.charAt(0) + activeTab.slice(1).toLowerCase()} Focus`}
+              {showCalendar ? 'Schedule'
+                : showWrapped ? 'Vrata Wrapped'
+                : showAnalytics ? 'Analytics'
+                : showHistory ? 'Completed Log'
+                : activeTab === TaskFrequency.STUDY ? 'Study Library'
+                : `${activeTab.charAt(0) + activeTab.slice(1).toLowerCase()} Focus`}
             </h2>
           </div>
-          {activeTab === TaskFrequency.FITNESS && !showAnalytics && !showHistory && !showWrapped && (
+          {activeTab === TaskFrequency.FITNESS && inTaskView && (
             <div className="flex gap-2">
               <button onClick={() => setFitnessEditorMode(fitnessEditorMode === 'THIS_WEEK' ? 'NONE' : 'THIS_WEEK')} className={`px-4 py-2 rounded-lg text-[10px] font-bold uppercase tracking-widest border transition-all ${fitnessEditorMode === 'THIS_WEEK' ? 'bg-white text-black' : 'border-zinc-800 text-zinc-500'}`}><Edit2 size={12} className="inline mr-2" /> Edit This Week</button>
               <button onClick={() => setFitnessEditorMode(fitnessEditorMode === 'NEXT_WEEK' ? 'NONE' : 'NEXT_WEEK')} className={`px-4 py-2 rounded-lg text-[10px] font-bold uppercase tracking-widest border transition-all ${fitnessEditorMode === 'NEXT_WEEK' ? 'bg-white text-black' : 'border-zinc-800 text-zinc-500'}`}><CalendarPlus size={12} className="inline mr-2" /> Plan Next Week</button>
@@ -279,25 +331,29 @@ function App() {
           )}
         </header>
 
-        {showWrapped ? (
+        {showCalendar ? (
+          <div className="max-w-3xl animate-in fade-in slide-in-from-bottom-4 duration-500">
+            <CalendarView />
+          </div>
+        ) : showWrapped ? (
           <div className="space-y-10 animate-in fade-in slide-in-from-bottom-6 duration-700">
-             <div className="bg-gradient-to-br from-zinc-900 to-black p-8 rounded-2xl border border-zinc-800 relative overflow-hidden">
-                <div className="absolute top-0 right-0 w-64 h-64 bg-white/5 blur-3xl rounded-full -translate-y-1/2 translate-x-1/2" />
-                <h3 className="text-5xl font-bold tracking-tighter text-white mb-6">The Cycle Concludes.</h3>
-                <div className="prose prose-invert max-w-none">
-                   <p className="text-lg text-zinc-300 font-light leading-relaxed">{wrappedReport.month || "Gathering your discipline data..."}</p>
-                </div>
-             </div>
-             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div className="p-6 bg-surface border border-border rounded-xl">
-                   <p className="text-[10px] uppercase tracking-widest text-zinc-500 mb-2">Month Efficiency</p>
-                   <p className="text-4xl font-light">{Math.round((tasks.filter(t => t.completed).length / (tasks.length || 1)) * 100)}%</p>
-                </div>
-                <div className="p-6 bg-surface border border-border rounded-xl">
-                   <p className="text-[10px] uppercase tracking-widest text-zinc-500 mb-2">Fitness Streak</p>
-                   <p className="text-4xl font-light">{tasks.filter(t => t.frequency === TaskFrequency.FITNESS && t.completed).length} Days</p>
-                </div>
-             </div>
+            <div className="bg-gradient-to-br from-zinc-900 to-black p-8 rounded-2xl border border-zinc-800 relative overflow-hidden">
+              <div className="absolute top-0 right-0 w-64 h-64 bg-white/5 blur-3xl rounded-full -translate-y-1/2 translate-x-1/2" />
+              <h3 className="text-5xl font-bold tracking-tighter text-white mb-6">The Cycle Concludes.</h3>
+              <div className="prose prose-invert max-w-none">
+                <p className="text-lg text-zinc-300 font-light leading-relaxed">{wrappedReport.month || "Gathering your discipline data..."}</p>
+              </div>
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="p-6 bg-surface border border-border rounded-xl">
+                <p className="text-[10px] uppercase tracking-widest text-zinc-500 mb-2">Month Efficiency</p>
+                <p className="text-4xl font-light">{Math.round((tasks.filter(t => t.completed).length / (tasks.length || 1)) * 100)}%</p>
+              </div>
+              <div className="p-6 bg-surface border border-border rounded-xl">
+                <p className="text-[10px] uppercase tracking-widest text-zinc-500 mb-2">Fitness Streak</p>
+                <p className="text-4xl font-light">{tasks.filter(t => t.frequency === TaskFrequency.FITNESS && t.completed).length} Days</p>
+              </div>
+            </div>
           </div>
         ) : showAnalytics ? (
           <div className="space-y-8 animate-in fade-in duration-500">
@@ -321,18 +377,36 @@ function App() {
             <div className="grid grid-cols-1 lg:grid-cols-5 gap-8">
               {(activeTab === TaskFrequency.EXAM || (activeTab === TaskFrequency.FITNESS && fitnessEditorMode !== 'NONE')) && (
                 <div className="lg:col-span-2 space-y-4">
-                  {activeTab === TaskFrequency.EXAM ? <ExamCalendar selectedDate={selectedExamDate} onSelectDate={setSelectedExamDate} examEvents={examEvents} tasks={tasks} onPinExam={() => {}} /> : <FitnessSelector selectedDay={selectedFitnessDay} onSelectDay={setSelectedFitnessDay} selectedType={selectedFitnessType} onSelectType={setSelectedFitnessType} />}
+                  {activeTab === TaskFrequency.EXAM
+                    ? <ExamCalendar selectedDate={selectedExamDate} onSelectDate={setSelectedExamDate} examEvents={examEvents} tasks={tasks} onPinExam={pinExam} />
+                    : <FitnessSelector selectedDay={selectedFitnessDay} onSelectDay={setSelectedFitnessDay} selectedType={selectedFitnessType} onSelectType={setSelectedFitnessType} />}
                 </div>
               )}
               <div className={`${(activeTab === TaskFrequency.EXAM || (activeTab === TaskFrequency.FITNESS && fitnessEditorMode !== 'NONE')) ? 'lg:col-span-3' : 'lg:col-span-5'} space-y-6`}>
-                {(activeTab !== TaskFrequency.FITNESS || fitnessEditorMode !== 'NONE') && <TaskInput onAdd={addTask} selectedFrequency={activeTab} />}
+                {(activeTab !== TaskFrequency.FITNESS || fitnessEditorMode !== 'NONE') && <TaskInput onAdd={handleAddTask} selectedFrequency={activeTab} />}
                 <div className="space-y-8">
-                  {activeTab === TaskFrequency.FITNESS ? [1, 2, 3, 4, 5, 6, 0].map(dayIdx => (
-                    <div key={dayIdx} className="space-y-2">
-                      <div className="flex items-center gap-3"><span className={`text-[10px] uppercase font-bold tracking-[0.2em] ${new Date().getDay() === dayIdx ? 'text-white' : 'text-zinc-600'}`}>{DAYS_OF_WEEK[dayIdx]}</span><div className="flex-1 h-px bg-zinc-900" /></div>
-                      {fitnessTasksGrouped[dayIdx].length === 0 ? <div className="p-3 text-[10px] text-zinc-800 italic border border-dashed border-zinc-900 rounded-lg">No session planned.</div> : fitnessTasksGrouped[dayIdx].map(renderTask)}
-                    </div>
-                  )) : tasks.filter(t => t.frequency === activeTab && !t.completed).map(renderTask)}
+                  {activeTab === TaskFrequency.FITNESS ? (
+                    [1, 2, 3, 4, 5, 6, 0].map(dayIdx => (
+                      <div key={dayIdx} className="space-y-2">
+                        <div className="flex items-center gap-3"><span className={`text-[10px] uppercase font-bold tracking-[0.2em] ${new Date().getDay() === dayIdx ? 'text-white' : 'text-zinc-600'}`}>{DAYS_OF_WEEK[dayIdx]}</span><div className="flex-1 h-px bg-zinc-900" /></div>
+                        {fitnessTasksGrouped[dayIdx].length === 0 ? <div className="p-3 text-[10px] text-zinc-800 italic border border-dashed border-zinc-900 rounded-lg">No session planned.</div> : fitnessTasksGrouped[dayIdx].map(renderTask)}
+                      </div>
+                    ))
+                  ) : activeTab === TaskFrequency.STUDY ? (
+                    tasks.filter(t => t.frequency === TaskFrequency.STUDY && !t.completed).length === 0 ? (
+                      <div className="text-center py-20 text-zinc-700 font-light border border-dashed border-border rounded-lg">
+                        No study sessions yet. Add a topic and paste a YouTube link to begin.
+                      </div>
+                    ) : (
+                      <div className="space-y-2">
+                        {tasks.filter(t => t.frequency === TaskFrequency.STUDY && !t.completed).map(task => (
+                          <StudyCard key={task.id} task={task} onToggle={toggleTask} onDelete={deleteTask} />
+                        ))}
+                      </div>
+                    )
+                  ) : (
+                    tasks.filter(t => t.frequency === activeTab && !t.completed).map(renderTask)
+                  )}
                 </div>
               </div>
             </div>
