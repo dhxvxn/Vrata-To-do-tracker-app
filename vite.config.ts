@@ -1,42 +1,23 @@
-// vite.config.ts
-import { defineConfig } from 'vite'
-import react from '@vitejs/plugin-react' // remove if not using React
-import { VitePWA } from 'vite-plugin-pwa'
-import path from 'path'
+import path from 'path';
+import { defineConfig, loadEnv } from 'vite';
+import react from '@vitejs/plugin-react';
 
-export default defineConfig({
-  base: './', // <- critical: use relative assets so GitHub Pages subpath works
-  plugins: [
-    react(),
-    VitePWA({
-      registerType: 'autoUpdate', // auto-update service worker
-      includeAssets: ['favicon.ico', 'robots.txt', 'icons/*'],
-      manifest: {
-        name: 'Vrata To-do tracker',
-        short_name: 'Vrata',
-        start_url: './index.html', // relative
-        scope: './',               // relative
-        display: 'standalone',
-        background_color: '#ffffff',
-        theme_color: '#ffffff',
-        icons: [
-          { src: 'icons/icon-192.png', sizes: '192x192', type: 'image/png' },
-          { src: 'icons/icon-512.png', sizes: '512x512', type: 'image/png' }
-        ]
+export default defineConfig(({ mode }) => {
+    const env = loadEnv(mode, '.', '');
+    return {
+      server: {
+        port: 3000,
+        host: '0.0.0.0',
       },
-      workbox: {
-        globPatterns: ['**/*.{js,css,html,ico,png,svg,json}'],
-        navigateFallback: './index.html', // SPA fallback for navigation
+      plugins: [react()],
+      define: {
+        'process.env.API_KEY': JSON.stringify(env.GEMINI_API_KEY),
+        'process.env.GEMINI_API_KEY': JSON.stringify(env.GEMINI_API_KEY)
       },
-      devOptions: {
-        enabled: false // disable PWA dev service worker when using `vite dev`
+      resolve: {
+        alias: {
+          '@': path.resolve(__dirname, '.'),
+        }
       }
-    })
-  ],
-  resolve: {
-    alias: {
-      '@': path.resolve(__dirname, 'src')
-    }
-  }
-})
-
+    };
+});

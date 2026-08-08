@@ -1,102 +1,74 @@
 
 import { GoogleGenAI } from "@google/genai";
-import { Task, TaskFrequency } from "../types";
+import { Task, TaskFrequency, Quote } from "../types";
 
-const MODEL = 'gemini-3-flash-preview';
-
-// Read the key from Vite env (VITE_GEMINI_API_KEY), falling back to a legacy
-// process.env value if one was injected. The key is OPTIONAL — without it the
-// app falls back to a locally-generated insight.
-const getApiKey = (): string | undefined =>
-  import.meta.env.VITE_GEMINI_API_KEY ||
-  (typeof process !== 'undefined' ? (process as any).env?.API_KEY : undefined);
-
-export const isGeminiConfigured = (): boolean => !!getApiKey();
-
-// A keyless, templated insight built purely from the user's own stats. Used when
-// no Gemini key is configured (i.e. the default, free experience) and as the
-// fallback if the API call fails.
-export const buildLocalInsight = (tasks: Task[]): string => {
-  if (tasks.length === 0) {
-    return 'A clean slate. Define one target and begin. Momentum follows the first move.';
-  }
-
-  const total = tasks.length;
-  const completed = tasks.filter(t => t.completed).length;
-  const rate = Math.round((completed / total) * 100);
-
-  const byFreq = (f: TaskFrequency) => {
-    const list = tasks.filter(t => t.frequency === f);
-    return { total: list.length, done: list.filter(t => t.completed).length };
-  };
-  const exam = byFreq(TaskFrequency.EXAM);
-  const study = byFreq(TaskFrequency.STUDY);
-
-  // Find the category dragging completion down the most.
-  const categories: { name: string; total: number; done: number }[] = [
-    { name: 'daily', ...byFreq(TaskFrequency.DAILY) },
-    { name: 'weekly', ...byFreq(TaskFrequency.WEEKLY) },
-    { name: 'monthly', ...byFreq(TaskFrequency.MONTHLY) },
-    { name: 'exam', ...exam },
-    { name: 'study', ...study },
-  ].filter(c => c.total > 0);
-
-  const laggard = categories
-    .map(c => ({ ...c, pct: c.done / c.total }))
-    .sort((a, b) => a.pct - b.pct)[0];
-
-  if (exam.total > 0 && exam.done < exam.total) {
-    return `Exam season is live: ${exam.total - exam.done} of ${exam.total} prep tasks remain. Discipline now compounds later. Hold the line.`;
-  }
-  if (rate >= 80) {
-    return `${rate}% cleared. Execution is sharp — protect the streak and resist complacency.`;
-  }
-  if (laggard && laggard.pct < 0.5) {
-    return `Your ${laggard.name} targets are lagging at ${Math.round(laggard.pct * 100)}%. Concentrate force there before starting anything new.`;
-  }
-  return `${completed} of ${total} done — ${rate}% overall. Steady, not spectacular. Close the open loops one at a time.`;
-};
+const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
 
 export const getProductivityInsight = async (tasks: Task[]): Promise<string> => {
-  // Free default: no key means a locally-generated insight, no network call.
-  if (!getApiKey()) return buildLocalInsight(tasks);
-
   try {
-    const ai = new GoogleGenAI({ apiKey: getApiKey() });
-
     const completedCount = tasks.filter(t => t.completed).length;
     const totalCount = tasks.length;
-
-    const daily = tasks.filter(t => t.frequency === TaskFrequency.DAILY);
-    const weekly = tasks.filter(t => t.frequency === TaskFrequency.WEEKLY);
-    const exam = tasks.filter(t => t.frequency === TaskFrequency.EXAM);
-
-    const summary = `
-      Total Tasks: ${totalCount}
-      Completed: ${completedCount}
-      Daily Tasks: ${daily.length} (${daily.filter(t => t.completed).length} done)
-      Weekly Tasks: ${weekly.length} (${weekly.filter(t => t.completed).length} done)
-      Exam Prep Tasks: ${exam.length} (${exam.filter(t => t.completed).length} done)
-    `;
+    
+    const summary = `Tasks: ${completedCount}/${totalCount}`;
 
     const response = await ai.models.generateContent({
-      model: MODEL,
-      contents: `
-        You are a minimalist, stoic productivity coach.
-        Analyze this user's task data:
-        ${summary}
-
-        Provide a very brief, high-impact insight or observation about their progress.
-        If they have Exam tasks, acknowledge the high-stakes season with a focus on discipline.
-        Keep it under 30 words.
-        Style: Direct, professional, slightly dark/minimalist aesthetic.
-        No emojis.
-      `,
+      model: 'gemini-3-flash-preview',
+      contents: `Stoic analyst. Brief insight on: ${summary}. Under 20 words. Minimalist.`,
     });
 
-    return response.text || buildLocalInsight(tasks);
+    return response.text || "Focus on the essential.";
   } catch (error) {
-    console.error("Gemini API Error:", error);
-    return buildLocalInsight(tasks);
+    return "Keep moving forward.";
+  }
+};
+
+export const getDailyQuote = async (category: 'GENERAL' | 'EXAM' | 'FITNESS'): Promise<Quote> => {
+  try {
+    const today = new Date().toDateString();
+    let focus = "";
+    
+    if (category === 'EXAM') {
+      focus = "learning, intelligence, focus, or socratic wisdom";
+    } else if (category === 'FITNESS') {
+      focus = "physical strength, the body, endurance, or the will to push boundaries";
+    } else {
+      focus = "discipline, time management, stoicism, or the value of action";
+    }
+
+    const response = await ai.models.generateContent({
+      model: 'gemini-3-flash-preview',
+      contents: `Provide a famous philosopher quote about ${focus}. 
+      Format strictly as JSON: { "text": "quote text here", "author": "Philosopher Name" }. 
+      Context: Today is ${today}. Make it unique and motivating for a minimalist dark theme.`,
+      config: { responseMimeType: "application/json" }
+    });
+    
+    const text = response.text || '{"text": "Waste no more time arguing what a good man should be. Be one.", "author": "Marcus Aurelius"}';
+    const data = JSON.parse(text);
+    return data;
+  } catch (e) {
+    return { text: "Waste no more time arguing what a good man should be. Be one.", author: "Marcus Aurelius" };
+  }
+};
+
+export const generateWrappedReport = async (tasks: Task[], period: 'MONTH' | 'YEAR'): Promise<string> => {
+  try {
+    const completed = tasks.filter(t => t.completed).length;
+    const total = tasks.length;
+    const fitness = tasks.filter(t => t.frequency === TaskFrequency.FITNESS && t.completed).length;
+    
+    const prompt = `Analyze this ${period} for a Vrata user:
+    Total Tasks: ${total}, Completed: ${completed}, Fitness sessions: ${fitness}.
+    Write a "Wrapped" style summary. Be poetic, slightly dark, and highly motivating. 
+    Call out their best category. Keep it under 60 words. No emojis.`;
+
+    const response = await ai.models.generateContent({
+      model: 'gemini-3-flash-preview',
+      contents: prompt,
+    });
+
+    return response.text || "A cycle concludes. The data shows growth through discipline.";
+  } catch (e) {
+    return "Your progress is etched in the record. A month of focus, a year of resolve.";
   }
 };

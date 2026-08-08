@@ -4,11 +4,10 @@ export enum TaskFrequency {
   WEEKLY = 'WEEKLY',
   MONTHLY = 'MONTHLY',
   EXAM = 'EXAM',
-  RUNNING = 'RUNNING',
-  STUDY = 'STUDY'
+  FITNESS = 'FITNESS'
 }
 
-export type RunType = 'TEMPO' | 'INTERVAL' | 'LONG' | 'EASY' | 'RECOVERY' | 'REST' | 'NONE';
+export type FitnessType = 'TEMPO' | 'INTERVAL' | 'LONG' | 'EASY_RECOVERY' | 'UPPER_BODY' | 'LOWER_BODY' | 'CORE_ABS' | 'NONE';
 
 export interface Task {
   id: string;
@@ -19,10 +18,7 @@ export interface Task {
   createdAt: string; // ISO Date string
   completedAt?: string; // ISO Date string
   scheduledDate?: string; // ISO Date string (YYYY-MM-DD)
-  runType?: RunType;
-  googleEventId?: string; // Google Calendar event id, once synced
-  youtubeUrl?: string; // Original YouTube link for STUDY tasks
-  youtubeVideoId?: string; // Parsed YouTube video id for thumbnail/embed
+  runType?: FitnessType; // Renamed conceptually but kept key for compatibility
 }
 
 export interface ExamEvent {
@@ -30,7 +26,6 @@ export interface ExamEvent {
   title: string;
   date: string; // ISO Date string (YYYY-MM-DD)
   color: string; // Hex color code
-  googleEventId?: string; // Google Calendar event id, once synced
 }
 
 export interface ProgressData {
@@ -44,7 +39,7 @@ export interface InsightState {
   error: string | null;
 }
 
-// Optional extra fields TaskInput can pass through onAdd (e.g. a YouTube link).
-export interface TaskExtras {
-  youtubeUrl?: string;
+export interface Quote {
+  text: string;
+  author: string;
 }
