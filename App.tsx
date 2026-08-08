@@ -1,33 +1,41 @@
 
 import React, { useState, useEffect, useMemo } from 'react';
-import { 
-  CheckCircle2, 
-  Circle, 
-  Trash2, 
-  BarChart3, 
+import {
+  CheckCircle2,
+  Circle,
+  Trash2,
+  BarChart3,
   Sparkles,
   Calendar,
   CalendarDays,
   CalendarRange,
   Flame,
-  Download,
   GraduationCap,
   Activity,
   History,
   Clock,
-  List,
   Edit2,
   CalendarPlus,
-  ArrowRight
+  CalendarCheck,
+  CalendarClock,
+  BookOpen,
+  Loader2
 } from 'lucide-react';
 import { v4 as uuidv4 } from 'uuid';
-import { Task, TaskFrequency, ProgressData, InsightState, ExamEvent, RunType } from './types';
+import { Task, TaskFrequency, InsightState, ExamEvent, RunType, TaskExtras, VoiceCommandResult } from './types';
 import { TaskInput } from './components/TaskInput';
 import { ProgressChart } from './components/ProgressChart';
 import { CategoryBarChart } from './components/AnalyticsCharts';
 import { ExamCalendar } from './components/ExamCalendar';
 import { RunSelector } from './components/RunSelector';
+import { StudyCard } from './components/StudyCard';
+import { CalendarView } from './components/CalendarView';
+import { VoiceAssistant } from './components/VoiceAssistant';
 import { getProductivityInsight } from './services/geminiService';
+import { useTasks } from './hooks/useTasks';
+import { parseYouTubeId } from './utils/youtube';
+import { isGoogleConfigured } from './services/googleAuthService';
+import { createEventFromTask, summarizeUpcoming } from './services/calendarService';
 
 const RUN_TYPE_COLORS: Record<RunType, string> = {
   TEMPO: '#ef4444',
@@ -42,19 +50,26 @@ const RUN_TYPE_COLORS: Record<RunType, string> = {
 const DAYS_OF_WEEK = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 
 function App() {
-  const [tasks, setTasks] = useState<Task[]>(() => {
-    const saved = localStorage.getItem('vrata_tasks');
-    return saved ? JSON.parse(saved) : [];
-  });
+  const {
+    tasks,
+    createTask,
+    toggleTask,
+    deleteTask,
+    updateTask,
+    completeTaskByTitle,
+    deleteTaskByTitle,
+  } = useTasks();
 
   const [examEvents, setExamEvents] = useState<ExamEvent[]>(() => {
     const saved = localStorage.getItem('vrata_exam_events');
     return saved ? JSON.parse(saved) : [];
   });
-  
+
   const [activeTab, setActiveTab] = useState<TaskFrequency>(TaskFrequency.DAILY);
   const [showAnalytics, setShowAnalytics] = useState(false);
   const [showHistory, setShowHistory] = useState(false);
+  const [showCalendar, setShowCalendar] = useState(false);
+  const [syncingId, setSyncingId] = useState<string | null>(null);
   
   // Running Editor States
   const [runningEditorMode, setRunningEditorMode] = useState<'NONE' | 'THIS_WEEK' | 'NEXT_WEEK'>('NONE');
@@ -72,60 +87,7 @@ function App() {
   const [deferredPrompt, setDeferredPrompt] = useState<any>(null);
   const [showInstallBtn, setShowInstallBtn] = useState(false);
 
-  // Periodic Refresh Logic
-  useEffect(() => {
-    const now = new Date();
-    const todayStr = now.toISOString().split('T')[0];
-    
-    const monday = new Date(now);
-    const day = now.getDay();
-    const diff = now.getDate() - day + (day === 0 ? -6 : 1);
-    monday.setDate(diff);
-    monday.setHours(0,0,0,0);
-
-    setTasks(prev => {
-      let changed = false;
-      const updated = prev.map(t => {
-        const completedDate = t.completedAt ? new Date(t.completedAt) : null;
-
-        if (t.frequency === TaskFrequency.DAILY) {
-          if (t.completed && completedDate && completedDate.toISOString().split('T')[0] !== todayStr) {
-            changed = true;
-            return { ...t, completed: false, completedAt: undefined };
-          }
-        } else if (t.frequency === TaskFrequency.WEEKLY) {
-          if (t.completed && completedDate && completedDate < monday) {
-            changed = true;
-            return { ...t, completed: false, completedAt: undefined };
-          }
-        } else if (t.frequency === TaskFrequency.MONTHLY) {
-          if (t.completed && completedDate && completedDate.getMonth() !== now.getMonth()) {
-            changed = true;
-            return { ...t, completed: false, completedAt: undefined };
-          }
-        }
-        return t;
-      }).filter(t => {
-        if (t.frequency === TaskFrequency.RUNNING) {
-          const createdDate = new Date(t.createdAt);
-          // Only auto-clear runs if they are from PREVIOUS weeks
-          const twoWeeksAgo = new Date(monday);
-          twoWeeksAgo.setDate(monday.getDate() - 7);
-          if (createdDate < twoWeeksAgo) {
-            changed = true;
-            return false;
-          }
-        }
-        return true;
-      });
-
-      return changed ? updated : prev;
-    });
-  }, []);
-
-  useEffect(() => {
-    localStorage.setItem('vrata_tasks', JSON.stringify(tasks));
-  }, [tasks]);
+  // Task state, persistence and the recurring-task reset now live in useTasks().
 
   useEffect(() => {
     localStorage.setItem('vrata_exam_events', JSON.stringify(examEvents));
@@ -154,7 +116,13 @@ function App() {
     }
   }, [showAnalytics, tasks, insight.content, insight.loading]);
 
-  const addTask = (title: string, frequency: TaskFrequency, details?: string) => {
+  const handleAddTask = (
+    title: string,
+    frequency: TaskFrequency,
+    details?: string,
+    extras?: TaskExtras,
+    explicitDate?: string
+  ) => {
     const now = new Date();
     let scheduledDate: string | undefined;
 
@@ -162,55 +130,82 @@ function App() {
       scheduledDate = selectedExamDate.toISOString().split('T')[0];
     } else if (frequency === TaskFrequency.RUNNING) {
       const isNextWeek = runningEditorMode === 'NEXT_WEEK';
-      const currentDay = now.getDay(); // 0 = Sun
-      
+
       // Calculate start of THIS week (Monday)
       const thisMonday = new Date(now);
       const day = now.getDay();
       const diff = now.getDate() - day + (day === 0 ? -6 : 1);
       thisMonday.setDate(diff);
-      
+
       const targetBase = new Date(thisMonday);
       if (isNextWeek) {
         targetBase.setDate(thisMonday.getDate() + 7);
       }
-      
+
       // Map selectedRunDay (0=Sun, 1=Mon...) to target week offset
-      // 1=Mon...6=Sat, 0=Sun
       const offset = selectedRunDay === 0 ? 6 : selectedRunDay - 1;
       const finalDate = new Date(targetBase);
       finalDate.setDate(targetBase.getDate() + offset);
       scheduledDate = finalDate.toISOString().split('T')[0];
     }
 
-    const newTask: Task = {
-      id: uuidv4(),
+    // A spoken/explicit date overrides the tab-derived one.
+    if (explicitDate) scheduledDate = explicitDate;
+
+    let youtubeUrl: string | undefined;
+    let youtubeVideoId: string | undefined;
+    if (frequency === TaskFrequency.STUDY && extras?.youtubeUrl) {
+      youtubeUrl = extras.youtubeUrl;
+      youtubeVideoId = parseYouTubeId(extras.youtubeUrl) || undefined;
+    }
+
+    createTask({
       title,
-      details,
-      completed: false,
       frequency,
-      createdAt: now.toISOString(),
+      details,
       scheduledDate,
-      runType: frequency === TaskFrequency.RUNNING ? selectedRunType : undefined
-    };
-    setTasks(prev => [newTask, ...prev]);
+      runType: frequency === TaskFrequency.RUNNING ? selectedRunType : undefined,
+      youtubeUrl,
+      youtubeVideoId,
+    });
   };
 
-  const toggleTask = (id: string) => {
-    setTasks(prev => prev.map(t => {
-      if (t.id === id) {
-        return { 
-          ...t, 
-          completed: !t.completed, 
-          completedAt: !t.completed ? new Date().toISOString() : undefined 
-        };
-      }
-      return t;
-    }));
+  // Push a scheduled task to Google Calendar and remember the event id.
+  const handleSyncTask = async (task: Task) => {
+    try {
+      setSyncingId(task.id);
+      const eventId = await createEventFromTask(task);
+      updateTask(task.id, { googleEventId: eventId });
+    } catch (e) {
+      console.error('Calendar sync failed:', e);
+    } finally {
+      setSyncingId(null);
+    }
   };
 
-  const deleteTask = (id: string) => {
-    setTasks(prev => prev.filter(t => t.id !== id));
+  // ---- Voice assistant wiring ----
+  const activeViewLabel = showAnalytics ? 'Analytics'
+    : showHistory ? 'History'
+    : showCalendar ? 'Schedule'
+    : `${activeTab.charAt(0) + activeTab.slice(1).toLowerCase()}`;
+
+  const handleVoiceAdd = (result: VoiceCommandResult) => {
+    handleAddTask(
+      result.title || 'Untitled task',
+      result.frequency ?? TaskFrequency.DAILY,
+      result.details,
+      undefined,
+      result.date,
+    );
+  };
+
+  const getTasksSummary = () => {
+    const active = tasks.filter(t => !t.completed);
+    if (active.length === 0) return 'You have no open tasks. Nicely done.';
+    const daily = active.filter(t => t.frequency === TaskFrequency.DAILY);
+    const scope = daily.length ? daily : active;
+    const titles = scope.slice(0, 5).map(t => t.title).join(', ');
+    return `You have ${active.length} open ${active.length === 1 ? 'task' : 'tasks'}. ${daily.length ? 'Today' : 'Up next'}: ${titles}.`;
   };
 
   const handlePinExam = (title: string, date: string, color: string) => {
@@ -298,6 +293,7 @@ function App() {
       { name: 'Monthly', ...getStats(TaskFrequency.MONTHLY) },
       { name: 'Exam', ...getStats(TaskFrequency.EXAM) },
       { name: 'Running', ...getStats(TaskFrequency.RUNNING) },
+      { name: 'Study', ...getStats(TaskFrequency.STUDY) },
     ];
   }, [tasks]);
 
@@ -309,6 +305,7 @@ function App() {
       [TaskFrequency.MONTHLY]: completed.filter(t => t.frequency === TaskFrequency.MONTHLY),
       [TaskFrequency.EXAM]: completed.filter(t => t.frequency === TaskFrequency.EXAM),
       [TaskFrequency.RUNNING]: completed.filter(t => t.frequency === TaskFrequency.RUNNING),
+      [TaskFrequency.STUDY]: completed.filter(t => t.frequency === TaskFrequency.STUDY),
     };
   }, [tasks]);
 
@@ -337,7 +334,23 @@ function App() {
             </div>
           </div>
         </div>
-        <button onClick={() => deleteTask(task.id)} className="text-zinc-600 hover:text-red-400 opacity-0 group-hover:opacity-100 p-2"><Trash2 size={16} /></button>
+        <div className="flex items-center">
+          {isGoogleConfigured() && task.scheduledDate && !task.completed && (
+            task.googleEventId ? (
+              <span className="text-emerald-500/70 p-2" title="On Google Calendar"><CalendarCheck size={16} /></span>
+            ) : (
+              <button
+                onClick={() => handleSyncTask(task)}
+                disabled={syncingId === task.id}
+                className="text-zinc-600 hover:text-white opacity-0 group-hover:opacity-100 p-2 disabled:opacity-40"
+                title="Add to Google Calendar"
+              >
+                {syncingId === task.id ? <Loader2 size={16} className="animate-spin" /> : <CalendarPlus size={16} />}
+              </button>
+            )
+          )}
+          <button onClick={() => deleteTask(task.id)} className="text-zinc-600 hover:text-red-400 opacity-0 group-hover:opacity-100 p-2"><Trash2 size={16} /></button>
+        </div>
       </div>
       {task.details && !task.completed && (
         <div className="ml-10 mt-2 space-y-1">
@@ -367,14 +380,15 @@ function App() {
             { id: TaskFrequency.WEEKLY, icon: CalendarDays, label: 'Weekly' },
             { id: TaskFrequency.MONTHLY, icon: CalendarRange, label: 'Monthly' },
             { id: TaskFrequency.EXAM, icon: GraduationCap, label: 'Exam' },
-            { id: TaskFrequency.RUNNING, icon: Activity, label: 'Running' }
+            { id: TaskFrequency.RUNNING, icon: Activity, label: 'Running' },
+            { id: TaskFrequency.STUDY, icon: BookOpen, label: 'Studies' }
           ].map(tab => (
             <button
               key={tab.id}
-              onClick={() => { setActiveTab(tab.id); setShowAnalytics(false); setShowHistory(false); setRunningEditorMode('NONE'); }}
+              onClick={() => { setActiveTab(tab.id); setShowAnalytics(false); setShowHistory(false); setShowCalendar(false); setRunningEditorMode('NONE'); }}
               className={`flex items-center gap-3 px-4 py-3 rounded-lg text-sm font-medium transition-all ${
-                !showAnalytics && !showHistory && activeTab === tab.id 
-                  ? 'bg-white text-black' 
+                !showAnalytics && !showHistory && !showCalendar && activeTab === tab.id
+                  ? 'bg-white text-black'
                   : 'text-textMuted hover:text-white hover:bg-surfaceHighlight'
               }`}
             >
@@ -385,7 +399,16 @@ function App() {
         </nav>
         <div className="mt-auto pt-6 flex flex-col gap-2 border-t border-border">
           <button
-            onClick={() => { setShowAnalytics(true); setShowHistory(false); setRunningEditorMode('NONE'); }}
+            onClick={() => { setShowCalendar(true); setShowAnalytics(false); setShowHistory(false); setRunningEditorMode('NONE'); }}
+            className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg text-sm font-medium transition-all ${
+              showCalendar ? 'bg-surfaceHighlight text-white border border-border' : 'text-textMuted hover:text-white'
+            }`}
+          >
+            <CalendarClock size={18} />
+            Schedule
+          </button>
+          <button
+            onClick={() => { setShowAnalytics(true); setShowHistory(false); setShowCalendar(false); setRunningEditorMode('NONE'); }}
             className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg text-sm font-medium transition-all ${
               showAnalytics ? 'bg-surfaceHighlight text-white border border-border' : 'text-textMuted hover:text-white'
             }`}
@@ -394,7 +417,7 @@ function App() {
             Analytics
           </button>
           <button
-            onClick={() => { setShowHistory(true); setShowAnalytics(false); setRunningEditorMode('NONE'); }}
+            onClick={() => { setShowHistory(true); setShowAnalytics(false); setShowCalendar(false); setRunningEditorMode('NONE'); }}
             className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg text-sm font-medium transition-all ${
               showHistory ? 'bg-surfaceHighlight text-white border border-border' : 'text-textMuted hover:text-white'
             }`}
@@ -409,20 +432,28 @@ function App() {
         <header className="mb-10 flex flex-col sm:flex-row sm:items-end justify-between gap-6">
           <div>
             <h2 className="text-3xl font-light text-white tracking-tight">
-              {showAnalytics ? 'Analytics' : showHistory ? 'Completed History' : `${activeTab.charAt(0) + activeTab.slice(1).toLowerCase()} Focus`}
+              {showCalendar ? 'Schedule'
+                : showAnalytics ? 'Analytics'
+                : showHistory ? 'Completed History'
+                : activeTab === TaskFrequency.STUDY ? 'Study Library'
+                : `${activeTab.charAt(0) + activeTab.slice(1).toLowerCase()} Focus`}
             </h2>
             <p className="text-textMuted mt-2 text-sm">
-              {showAnalytics 
-                ? 'Consistency is the discipline of greatness.' 
-                : showHistory 
-                  ? 'Evidence of your past discipline.'
-                  : activeTab === TaskFrequency.RUNNING 
-                    ? `Weekly running schedule. Focus on the miles.`
-                    : `You have completed ${completionRate}% of your ${activeTab.toLowerCase()} targets.`}
+              {showCalendar
+                ? 'Your upcoming Google Calendar, in one place.'
+                : showAnalytics
+                  ? 'Consistency is the discipline of greatness.'
+                  : showHistory
+                    ? 'Evidence of your past discipline.'
+                    : activeTab === TaskFrequency.RUNNING
+                      ? `Weekly running schedule. Focus on the miles.`
+                      : activeTab === TaskFrequency.STUDY
+                        ? `Save YouTube lectures and track what you learn.`
+                        : `You have completed ${completionRate}% of your ${activeTab.toLowerCase()} targets.`}
             </p>
           </div>
           
-          {activeTab === TaskFrequency.RUNNING && !showAnalytics && !showHistory && (
+          {activeTab === TaskFrequency.RUNNING && !showAnalytics && !showHistory && !showCalendar && (
             <div className="flex items-center gap-2">
                <button 
                   onClick={() => setRunningEditorMode(runningEditorMode === 'THIS_WEEK' ? 'NONE' : 'THIS_WEEK')}
@@ -446,7 +477,11 @@ function App() {
           )}
         </header>
 
-        {showAnalytics ? (
+        {showCalendar ? (
+          <div className="max-w-3xl animate-in fade-in slide-in-from-bottom-4 duration-500">
+            <CalendarView />
+          </div>
+        ) : showAnalytics ? (
           <div className="space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
             {insight.loading ? (
               <div className="bg-surface p-6 rounded-lg border border-border animate-pulse flex items-center gap-3">
@@ -562,7 +597,7 @@ function App() {
               <div className={`${(activeTab === TaskFrequency.EXAM || (activeTab === TaskFrequency.RUNNING && runningEditorMode !== 'NONE')) ? 'lg:col-span-3' : 'lg:col-span-5 max-w-3xl'} space-y-6`}>
                 {/* Hide input if not in running edit mode */}
                 {(activeTab !== TaskFrequency.RUNNING || runningEditorMode !== 'NONE') && (
-                  <TaskInput onAdd={addTask} selectedFrequency={activeTab} />
+                  <TaskInput onAdd={handleAddTask} selectedFrequency={activeTab} />
                 )}
                 
                 <div className="space-y-8">
@@ -593,6 +628,19 @@ function App() {
                         </div>
                       );
                     })
+                  ) : activeTab === TaskFrequency.STUDY ? (
+                    // Study library: video-forward cards
+                    filteredTasks.length === 0 ? (
+                      <div className="text-center py-20 text-zinc-700 font-light border border-dashed border-border rounded-lg">
+                        No study sessions yet. Add a topic and paste a YouTube link to begin.
+                      </div>
+                    ) : (
+                      <div className="space-y-2">
+                        {filteredTasks.map(task => (
+                          <StudyCard key={task.id} task={task} onToggle={toggleTask} onDelete={deleteTask} />
+                        ))}
+                      </div>
+                    )
                   ) : (
                     // Regular flat list for other frequencies
                     filteredTasks.length === 0 ? (
@@ -611,6 +659,16 @@ function App() {
           </div>
         )}
       </main>
+
+      <VoiceAssistant
+        activeTabLabel={activeViewLabel}
+        taskTitles={tasks.filter(t => !t.completed).map(t => t.title)}
+        onAddTask={handleVoiceAdd}
+        onCompleteTask={completeTaskByTitle}
+        onDeleteTask={deleteTaskByTitle}
+        getTasksSummary={getTasksSummary}
+        getScheduleSummary={isGoogleConfigured() ? summarizeUpcoming : undefined}
+      />
     </div>
   );
 }
