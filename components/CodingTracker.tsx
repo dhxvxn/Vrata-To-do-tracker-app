@@ -86,12 +86,16 @@ export const CodingTracker: React.FC<CodingTrackerProps> = ({ settings, onUpdate
           ) : ghStats ? (
             <>
               <div className="flex items-center gap-3 mb-4">
-                <img src={ghStats.avatar} alt="" className="w-10 h-10 rounded-full" referrerPolicy="no-referrer" />
+                {ghStats.avatar
+                  ? <img src={ghStats.avatar} alt="" className="w-10 h-10 rounded-full" referrerPolicy="no-referrer" />
+                  : <div className="w-10 h-10 rounded-full bg-zinc-800 flex items-center justify-center"><Github size={18} className="text-zinc-500" /></div>}
                 <div className="min-w-0">
                   <a href={ghStats.url} target="_blank" rel="noopener noreferrer" className="text-sm text-white font-medium flex items-center gap-1 hover:underline">
                     {ghStats.name || ghStats.login} <ExternalLink size={11} />
                   </a>
-                  <div className="text-[11px] text-zinc-500">{ghStats.repos} repos · {ghStats.followers} followers</div>
+                  {ghStats.hasProfile
+                    ? <div className="text-[11px] text-zinc-500">{ghStats.repos} repos · {ghStats.followers} followers</div>
+                    : <div className="text-[11px] text-zinc-600">Profile details rate-limited — contributions shown below</div>}
                 </div>
               </div>
               <div className="flex gap-4 mb-4">

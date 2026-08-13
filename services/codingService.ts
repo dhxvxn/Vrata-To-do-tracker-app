@@ -12,6 +12,7 @@ export interface GithubStats {
   totalContributions: number;
   streak: number;
   cells: { date: string; count: number }[];
+  hasProfile: boolean; // false when the GitHub profile API was rate-limited
 }
 
 export interface LeetcodeStats {
@@ -48,32 +49,47 @@ export const fetchGithubStats = async (user: string): Promise<GithubStats> => {
   const u = extractGithubUser(user);
   if (!u) throw new Error('Enter a GitHub username.');
 
-  const profileRes = await fetch(`https://api.github.com/users/${encodeURIComponent(u)}`);
-  if (profileRes.status === 404) throw new Error(`GitHub user "${u}" not found.`);
-  if (!profileRes.ok) throw new Error('GitHub is rate-limiting or unavailable. Try again later.');
-  const profile = await profileRes.json();
-
+  // Contribution graph first — this proxy has generous limits and is the main
+  // value, so the card can render even if the GitHub profile API is throttled.
   let cells: { date: string; count: number }[] = [];
   let totalContributions = 0;
+  let contribOk = false;
   try {
     const contribRes = await fetch(`https://github-contributions-api.jogruber.de/v4/${encodeURIComponent(u)}?y=last`);
     if (contribRes.ok) {
       const data = await contribRes.json();
-      cells = (data.contributions || []).map((c: any) => ({ date: c.date, count: c.count }));
-      totalContributions = cells.reduce((sum, c) => sum + c.count, 0);
+      if (Array.isArray(data.contributions)) {
+        cells = data.contributions.map((c: any) => ({ date: c.date, count: c.count }));
+        totalContributions = cells.reduce((sum, c) => sum + c.count, 0);
+        contribOk = true;
+      }
     }
-  } catch { /* contributions are best-effort */ }
+  } catch { /* best-effort */ }
+
+  // Profile enrichment (avatar/repos/followers). GitHub's unauthenticated API is
+  // limited to 60 req/hr per IP, so treat failure as non-fatal.
+  let profile: any = null;
+  let notFound = false;
+  try {
+    const profileRes = await fetch(`https://api.github.com/users/${encodeURIComponent(u)}`);
+    if (profileRes.status === 404) notFound = true;
+    else if (profileRes.ok) profile = await profileRes.json();
+  } catch { /* rate-limited or offline — degrade gracefully */ }
+
+  if (!contribOk && notFound) throw new Error(`GitHub user "${u}" not found.`);
+  if (!contribOk && !profile) throw new Error('GitHub is rate-limiting or unavailable. Try again in a bit.');
 
   return {
-    login: profile.login,
-    name: profile.name,
-    avatar: profile.avatar_url,
-    url: profile.html_url,
-    repos: profile.public_repos ?? 0,
-    followers: profile.followers ?? 0,
+    login: profile?.login || u,
+    name: profile?.name ?? null,
+    avatar: profile?.avatar_url || '',
+    url: profile?.html_url || `https://github.com/${u}`,
+    repos: profile?.public_repos ?? 0,
+    followers: profile?.followers ?? 0,
     totalContributions,
     streak: computeStreak(cells),
     cells,
+    hasProfile: !!profile,
   };
 };
 
