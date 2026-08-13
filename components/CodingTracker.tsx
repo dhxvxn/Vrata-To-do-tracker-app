@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { Github, Code2, RefreshCw, Flame, AlertCircle, ExternalLink } from 'lucide-react';
 import { Settings } from '../types';
-import { fetchGithubStats, fetchLeetcodeStats, GithubStats, LeetcodeStats } from '../services/codingService';
+import { fetchGithubStats, fetchLeetcodeStats, extractGithubUser, extractLeetcodeUser, GithubStats, LeetcodeStats } from '../services/codingService';
 
 interface CodingTrackerProps {
   settings: Settings;
@@ -45,8 +45,12 @@ export const CodingTracker: React.FC<CodingTrackerProps> = ({ settings, onUpdate
   }, []);
 
   const save = () => {
-    onUpdateSettings({ githubUser: gh.trim() || undefined, leetcodeUser: lc.trim() || undefined });
-    load(gh, lc);
+    const ghClean = extractGithubUser(gh);
+    const lcClean = extractLeetcodeUser(lc);
+    setGh(ghClean);
+    setLc(lcClean);
+    onUpdateSettings({ githubUser: ghClean || undefined, leetcodeUser: lcClean || undefined });
+    load(ghClean, lcClean);
   };
 
   const recent = ghStats ? ghStats.cells.slice(-119) : [];
@@ -56,12 +60,12 @@ export const CodingTracker: React.FC<CodingTrackerProps> = ({ settings, onUpdate
       <div className="flex flex-col sm:flex-row gap-3">
         <div className="flex-1 flex items-center bg-surface border border-border rounded-lg overflow-hidden">
           <span className="pl-3 text-zinc-600"><Github size={16} /></span>
-          <input value={gh} onChange={e => setGh(e.target.value)} placeholder="GitHub username"
+          <input value={gh} onChange={e => setGh(e.target.value)} placeholder="GitHub username or profile link"
             className="flex-1 bg-transparent px-3 py-2.5 text-sm text-zinc-200 placeholder-zinc-600 outline-none" />
         </div>
         <div className="flex-1 flex items-center bg-surface border border-border rounded-lg overflow-hidden">
           <span className="pl-3 text-zinc-600"><Code2 size={16} /></span>
-          <input value={lc} onChange={e => setLc(e.target.value)} placeholder="LeetCode username"
+          <input value={lc} onChange={e => setLc(e.target.value)} placeholder="LeetCode username or profile link"
             className="flex-1 bg-transparent px-3 py-2.5 text-sm text-zinc-200 placeholder-zinc-600 outline-none" />
         </div>
         <button onClick={save} disabled={loading}

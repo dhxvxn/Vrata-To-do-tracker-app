@@ -25,7 +25,8 @@ import {
   FileText,
   Target,
   Code2,
-  Bell
+  Bell,
+  PartyPopper
 } from 'lucide-react';
 import { Task, TaskFrequency, FitnessType, Quote, TaskExtras, Priority, SubTask, WorkoutSet } from './types';
 import { TaskInput } from './components/TaskInput';
@@ -34,7 +35,7 @@ import { CategoryBarChart, FocusChart } from './components/AnalyticsCharts';
 import { ExamCalendar } from './components/ExamCalendar';
 import { FitnessSelector } from './components/FitnessSelector';
 import { StudyCard } from './components/StudyCard';
-import { CalendarView } from './components/CalendarView';
+import { FestivalCalendar } from './components/FestivalCalendar';
 import { AuthControl } from './components/AuthControl';
 import { StreakBadge } from './components/StreakBadge';
 import { Heatmap } from './components/Heatmap';
@@ -373,7 +374,7 @@ function App() {
           <button onClick={() => resetViews(() => setShowNotes(true))} className={`flex items-center gap-3 px-4 py-3 rounded-lg text-sm font-medium ${showNotes ? 'bg-surfaceHighlight text-white' : 'text-textMuted hover:text-white'}`}><FileText size={18} /> Notes</button>
           <button onClick={() => resetViews(() => setShowGoals(true))} className={`flex items-center gap-3 px-4 py-3 rounded-lg text-sm font-medium ${showGoals ? 'bg-surfaceHighlight text-white' : 'text-textMuted hover:text-white'}`}><Target size={18} /> Goals</button>
           <button onClick={() => resetViews(() => setShowConnect(true))} className={`flex items-center gap-3 px-4 py-3 rounded-lg text-sm font-medium ${showConnect ? 'bg-surfaceHighlight text-white' : 'text-textMuted hover:text-white'}`}><Code2 size={18} /> Coding</button>
-          <button onClick={() => resetViews(() => setShowCalendar(true))} className={`flex items-center gap-3 px-4 py-3 rounded-lg text-sm font-medium ${showCalendar ? 'bg-surfaceHighlight text-white' : 'text-textMuted hover:text-white'}`}><CalendarClock size={18} /> Schedule</button>
+          <button onClick={() => resetViews(() => setShowCalendar(true))} className={`flex items-center gap-3 px-4 py-3 rounded-lg text-sm font-medium ${showCalendar ? 'bg-surfaceHighlight text-white' : 'text-textMuted hover:text-white'}`}><PartyPopper size={18} /> Festivals</button>
           <button onClick={() => resetViews(() => setShowAnalytics(true))} className={`flex items-center gap-3 px-4 py-3 rounded-lg text-sm font-medium ${showAnalytics ? 'bg-surfaceHighlight text-white' : 'text-textMuted hover:text-white'}`}><BarChart3 size={18} /> Analytics</button>
           <button onClick={() => resetViews(() => setShowHistory(true))} className={`flex items-center gap-3 px-4 py-3 rounded-lg text-sm font-medium ${showHistory ? 'bg-surfaceHighlight text-white' : 'text-textMuted hover:text-white'}`}><History size={18} /> History</button>
           <button onClick={() => resetViews(() => setShowWrapped(true))} className={`flex items-center gap-3 px-4 py-3 rounded-lg text-sm font-medium ${showWrapped ? 'bg-surfaceHighlight text-white' : 'text-textMuted hover:text-white'}`}><Box size={18} /> Wrapped</button>
@@ -408,7 +409,7 @@ function App() {
                 : showNotes ? 'Notes'
                 : showGoals ? 'Goals'
                 : showConnect ? 'Coding'
-                : showCalendar ? 'Schedule'
+                : showCalendar ? 'Festivals'
                 : showWrapped ? 'Vrata Wrapped'
                 : showAnalytics ? 'Analytics'
                 : showHistory ? 'Completed Log'
@@ -433,9 +434,7 @@ function App() {
         ) : showGoals ? (
           <GoalsView goals={goals} onAdd={addGoal} onUpdate={updateGoal} onDelete={deleteGoal} />
         ) : showCalendar ? (
-          <div className="max-w-3xl animate-in fade-in slide-in-from-bottom-4 duration-500">
-            <CalendarView />
-          </div>
+          <FestivalCalendar />
         ) : showWrapped ? (
           <div className="space-y-10 animate-in fade-in slide-in-from-bottom-6 duration-700">
             <div className="bg-gradient-to-br from-zinc-900 to-black p-8 rounded-2xl border border-zinc-800 relative overflow-hidden">
