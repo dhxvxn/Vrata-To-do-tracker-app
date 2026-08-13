@@ -1,9 +1,10 @@
 
 import React, { useMemo, useRef, useState } from 'react';
-import { Plus, AlignLeft, Youtube, Mic, X } from 'lucide-react';
+import { Plus, AlignLeft, Youtube, Mic, X, Bell } from 'lucide-react';
 import { TaskFrequency, TaskExtras, Priority } from '../types';
 import { parseYouTubeId } from '../utils/youtube';
 import { createRecognition, isSpeechRecognitionSupported, RecognitionController } from '../services/voiceService';
+import { requestPermission, notificationsSupported } from '../services/notificationService';
 
 const PRIORITIES: { value: Priority; label: string; color: string }[] = [
   { value: 'LOW', label: 'Low', color: '#3b82f6' },
@@ -24,8 +25,11 @@ export const TaskInput: React.FC<TaskInputProps> = ({ onAdd, selectedFrequency }
   const [priority, setPriority] = useState<Priority | undefined>(undefined);
   const [tags, setTags] = useState<string[]>([]);
   const [tagInput, setTagInput] = useState('');
+  const [remindAt, setRemindAt] = useState('');
+  const [showReminder, setShowReminder] = useState(false);
   const [listening, setListening] = useState(false);
   const controllerRef = useRef<RecognitionController | null>(null);
+  const voiceSupportedReminders = notificationsSupported();
 
   const addTag = (raw: string) => {
     const t = raw.trim().replace(/,$/, '');
@@ -57,6 +61,7 @@ export const TaskInput: React.FC<TaskInputProps> = ({ onAdd, selectedFrequency }
       ...(isStudy && youtubeUrl.trim() ? { youtubeUrl: youtubeUrl.trim() } : {}),
       ...(priority ? { priority } : {}),
       ...(tags.length ? { tags } : {}),
+      ...(remindAt ? { remindAt: new Date(remindAt).toISOString() } : {}),
     };
     onAdd(text, selectedFrequency, details.trim() || undefined, Object.keys(extras).length ? extras : undefined);
     setText('');
@@ -65,6 +70,8 @@ export const TaskInput: React.FC<TaskInputProps> = ({ onAdd, selectedFrequency }
     setPriority(undefined);
     setTags([]);
     setTagInput('');
+    setRemindAt('');
+    setShowReminder(false);
     if (selectedFrequency !== TaskFrequency.FITNESS) setShowDetails(false);
   };
 
@@ -112,6 +119,17 @@ export const TaskInput: React.FC<TaskInputProps> = ({ onAdd, selectedFrequency }
         >
           <Mic size={18} />
         </button>
+
+        {voiceSupportedReminders && (
+          <button
+            type="button"
+            onClick={() => { const next = !showReminder; setShowReminder(next); if (next) requestPermission(); }}
+            className={`p-3 transition-colors ${showReminder || remindAt ? 'text-white' : 'text-zinc-600 hover:text-zinc-400'}`}
+            title="Set a reminder"
+          >
+            <Bell size={18} />
+          </button>
+        )}
 
         <button
           type="button"
@@ -172,6 +190,19 @@ export const TaskInput: React.FC<TaskInputProps> = ({ onAdd, selectedFrequency }
           className="w-16 bg-transparent text-[11px] text-zinc-300 placeholder-zinc-700 outline-none"
         />
       </div>
+
+      {showReminder && (
+        <div className="animate-in slide-in-from-top-2 duration-300 flex items-center gap-2">
+          <Bell size={14} className="text-zinc-500" />
+          <input
+            type="datetime-local"
+            value={remindAt}
+            onChange={e => setRemindAt(e.target.value)}
+            className="bg-surface border border-border rounded-lg px-3 py-2 text-xs text-zinc-300 outline-none focus:border-textMuted"
+          />
+          {remindAt && <button type="button" onClick={() => setRemindAt('')} className="text-zinc-600 hover:text-red-400"><X size={14} /></button>}
+        </div>
+      )}
 
       {isStudy && (
         <div className="animate-in slide-in-from-top-2 duration-300">

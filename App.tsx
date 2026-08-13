@@ -20,7 +20,12 @@ import {
   BookOpen,
   Loader2,
   Box,
-  Search
+  Search,
+  Sun,
+  FileText,
+  Target,
+  Code2,
+  Bell
 } from 'lucide-react';
 import { Task, TaskFrequency, FitnessType, Quote, TaskExtras, Priority, SubTask, WorkoutSet } from './types';
 import { TaskInput } from './components/TaskInput';
@@ -37,9 +42,14 @@ import { FocusTimer } from './components/FocusTimer';
 import { ExamCountdown } from './components/ExamCountdown';
 import { WorkoutLog } from './components/WorkoutLog';
 import { SubtaskList } from './components/SubtaskList';
+import { CodingTracker } from './components/CodingTracker';
+import { NotesView } from './components/NotesView';
+import { GoalsView } from './components/GoalsView';
+import { TodayDashboard } from './components/TodayDashboard';
 import { getDailyQuote, generateWrappedReport } from './services/geminiService';
 import { useTasks } from './hooks/useTasks';
 import { useAuth } from './hooks/useAuth';
+import { useReminders } from './hooks/useReminders';
 import { parseYouTubeId } from './utils/youtube';
 import { isGoogleConfigured } from './services/googleAuthService';
 import { createEventFromTask } from './services/calendarService';
@@ -67,14 +77,26 @@ function App() {
     tasks,
     examEvents,
     focusSessions,
+    notes,
+    goals,
+    settings,
     createTask,
     toggleTask,
     deleteTask,
     updateTask,
     pinExam,
     addFocusSession,
+    addNote,
+    updateNote,
+    deleteNote,
+    addGoal,
+    updateGoal,
+    deleteGoal,
+    updateSettings,
     syncing,
   } = useTasks(auth.user);
+
+  useReminders(tasks);
 
   const [query, setQuery] = useState('');
   const streak = useMemo(() => computeStreak(tasks), [tasks]);
@@ -82,10 +104,14 @@ function App() {
   const badges = useMemo(() => earnedBadges(tasks), [tasks]);
 
   const [activeTab, setActiveTab] = useState<TaskFrequency>(TaskFrequency.DAILY);
+  const [showToday, setShowToday] = useState(true);
   const [showAnalytics, setShowAnalytics] = useState(false);
   const [showHistory, setShowHistory] = useState(false);
   const [showWrapped, setShowWrapped] = useState(false);
   const [showCalendar, setShowCalendar] = useState(false);
+  const [showNotes, setShowNotes] = useState(false);
+  const [showGoals, setShowGoals] = useState(false);
+  const [showConnect, setShowConnect] = useState(false);
   const [syncingId, setSyncingId] = useState<string | null>(null);
 
   const [fitnessEditorMode, setFitnessEditorMode] = useState<'NONE' | 'THIS_WEEK' | 'NEXT_WEEK'>('NONE');
@@ -117,7 +143,8 @@ function App() {
   }, [showWrapped, tasks, wrappedReport.month]);
 
   const resetViews = (setter: () => void) => {
-    setShowAnalytics(false); setShowHistory(false); setShowWrapped(false); setShowCalendar(false);
+    setShowToday(false); setShowAnalytics(false); setShowHistory(false); setShowWrapped(false);
+    setShowCalendar(false); setShowNotes(false); setShowGoals(false); setShowConnect(false);
     setter();
   };
 
@@ -248,6 +275,11 @@ function App() {
               {task.tags && task.tags.map(tag => (
                 <span key={tag} className="text-[8px] text-zinc-400 bg-zinc-900 px-1.5 py-0.5 rounded">#{tag}</span>
               ))}
+              {task.remindAt && !task.completed && (
+                <span className="text-[8px] text-amber-400/80 font-mono flex items-center gap-1">
+                  <Bell size={8} /> {new Date(task.remindAt).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                </span>
+              )}
               {task.completedAt && (
                 <span className="text-[8px] text-zinc-700 font-mono flex items-center gap-1">
                   <Clock size={8} /> {new Date(task.completedAt).toLocaleDateString()}
@@ -300,7 +332,7 @@ function App() {
     { id: TaskFrequency.STUDY, icon: BookOpen, label: 'Studies' }
   ];
 
-  const inTaskView = !showAnalytics && !showHistory && !showWrapped && !showCalendar;
+  const inTaskView = !showToday && !showAnalytics && !showHistory && !showWrapped && !showCalendar && !showNotes && !showGoals && !showConnect;
 
   return (
     <div className="min-h-screen bg-black text-textMain flex flex-col md:flex-row">
@@ -321,6 +353,12 @@ function App() {
           />
         </div>
         <nav className="flex flex-col gap-1">
+          <button
+            onClick={() => resetViews(() => setShowToday(true))}
+            className={`flex items-center gap-3 px-4 py-3 rounded-lg text-sm font-medium transition-all ${showToday ? 'bg-white text-black' : 'text-textMuted hover:text-white hover:bg-surfaceHighlight'}`}
+          >
+            <Sun size={18} /> Today
+          </button>
           {sidebarTabs.map(tab => (
             <button
               key={tab.id}
@@ -332,6 +370,9 @@ function App() {
           ))}
         </nav>
         <div className="mt-auto pt-6 flex flex-col gap-1 border-t border-border">
+          <button onClick={() => resetViews(() => setShowNotes(true))} className={`flex items-center gap-3 px-4 py-3 rounded-lg text-sm font-medium ${showNotes ? 'bg-surfaceHighlight text-white' : 'text-textMuted hover:text-white'}`}><FileText size={18} /> Notes</button>
+          <button onClick={() => resetViews(() => setShowGoals(true))} className={`flex items-center gap-3 px-4 py-3 rounded-lg text-sm font-medium ${showGoals ? 'bg-surfaceHighlight text-white' : 'text-textMuted hover:text-white'}`}><Target size={18} /> Goals</button>
+          <button onClick={() => resetViews(() => setShowConnect(true))} className={`flex items-center gap-3 px-4 py-3 rounded-lg text-sm font-medium ${showConnect ? 'bg-surfaceHighlight text-white' : 'text-textMuted hover:text-white'}`}><Code2 size={18} /> Coding</button>
           <button onClick={() => resetViews(() => setShowCalendar(true))} className={`flex items-center gap-3 px-4 py-3 rounded-lg text-sm font-medium ${showCalendar ? 'bg-surfaceHighlight text-white' : 'text-textMuted hover:text-white'}`}><CalendarClock size={18} /> Schedule</button>
           <button onClick={() => resetViews(() => setShowAnalytics(true))} className={`flex items-center gap-3 px-4 py-3 rounded-lg text-sm font-medium ${showAnalytics ? 'bg-surfaceHighlight text-white' : 'text-textMuted hover:text-white'}`}><BarChart3 size={18} /> Analytics</button>
           <button onClick={() => resetViews(() => setShowHistory(true))} className={`flex items-center gap-3 px-4 py-3 rounded-lg text-sm font-medium ${showHistory ? 'bg-surfaceHighlight text-white' : 'text-textMuted hover:text-white'}`}><History size={18} /> History</button>
@@ -363,7 +404,11 @@ function App() {
         <header className="mb-10 flex flex-col sm:flex-row sm:items-end justify-between gap-6">
           <div>
             <h2 className="text-3xl font-light text-white tracking-tight">
-              {showCalendar ? 'Schedule'
+              {showToday ? 'Today'
+                : showNotes ? 'Notes'
+                : showGoals ? 'Goals'
+                : showConnect ? 'Coding'
+                : showCalendar ? 'Schedule'
                 : showWrapped ? 'Vrata Wrapped'
                 : showAnalytics ? 'Analytics'
                 : showHistory ? 'Completed Log'
@@ -379,7 +424,15 @@ function App() {
           )}
         </header>
 
-        {showCalendar ? (
+        {showToday ? (
+          <TodayDashboard tasks={tasks} examEvents={examEvents} focusSessions={focusSessions} streak={streak} xp={xp} onToggle={toggleTask} />
+        ) : showConnect ? (
+          <CodingTracker settings={settings} onUpdateSettings={updateSettings} />
+        ) : showNotes ? (
+          <NotesView notes={notes} onAdd={addNote} onUpdate={updateNote} onDelete={deleteNote} />
+        ) : showGoals ? (
+          <GoalsView goals={goals} onAdd={addGoal} onUpdate={updateGoal} onDelete={deleteGoal} />
+        ) : showCalendar ? (
           <div className="max-w-3xl animate-in fade-in slide-in-from-bottom-4 duration-500">
             <CalendarView />
           </div>

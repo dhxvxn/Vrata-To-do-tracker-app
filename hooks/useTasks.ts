@@ -2,12 +2,15 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { v4 as uuidv4 } from 'uuid';
 import type { User } from 'firebase/auth';
 import { doc, onSnapshot, setDoc } from 'firebase/firestore';
-import { Task, TaskFrequency, ExamEvent, FocusSession, Priority } from '../types';
+import { Task, TaskFrequency, ExamEvent, FocusSession, Priority, Note, Goal, Settings } from '../types';
 import { db, isFirebaseConfigured } from '../services/firebase';
 
 const TASKS_KEY = 'vrata_tasks';
 const EXAMS_KEY = 'vrata_exam_events';
 const FOCUS_KEY = 'vrata_focus_sessions';
+const NOTES_KEY = 'vrata_notes';
+const GOALS_KEY = 'vrata_goals';
+const SETTINGS_KEY = 'vrata_settings';
 
 export interface NewTaskInput {
   title: string;
@@ -19,15 +22,14 @@ export interface NewTaskInput {
   youtubeVideoId?: string;
   priority?: Priority;
   tags?: string[];
+  remindAt?: string;
 }
 
-const load = <T,>(key: string): T[] => {
-  try {
-    const saved = localStorage.getItem(key);
-    return saved ? JSON.parse(saved) : [];
-  } catch {
-    return [];
-  }
+const loadList = <T,>(key: string): T[] => {
+  try { const s = localStorage.getItem(key); return s ? JSON.parse(s) : []; } catch { return []; }
+};
+const loadObj = <T,>(key: string, fallback: T): T => {
+  try { const s = localStorage.getItem(key); return s ? JSON.parse(s) : fallback; } catch { return fallback; }
 };
 
 // Merge two id-keyed lists (remote wins on conflict).
@@ -42,22 +44,27 @@ const sortByCreated = (tasks: Task[]): Task[] =>
   [...tasks].sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
 
 /**
- * Owns tasks + exam events + focus sessions: localStorage persistence, the
- * recurring-task reset, all CRUD, and — when a Firebase user is signed in —
- * real-time cross-device sync via a single Firestore document `users/{uid}`.
- * Signed out (or Firebase unconfigured) it behaves like the localStorage-only app.
+ * Owns all synced data — tasks, exam events, focus sessions, notes, goals and
+ * settings — with localStorage persistence, the recurring-task reset, CRUD, and
+ * (when signed in) real-time cross-device sync via one Firestore doc `users/{uid}`.
  */
 export function useTasks(user?: User | null) {
   const configured = isFirebaseConfigured();
-  const [tasks, setTasks] = useState<Task[]>(() => load<Task>(TASKS_KEY));
-  const [examEvents, setExamEvents] = useState<ExamEvent[]>(() => load<ExamEvent>(EXAMS_KEY));
-  const [focusSessions, setFocusSessions] = useState<FocusSession[]>(() => load<FocusSession>(FOCUS_KEY));
+  const [tasks, setTasks] = useState<Task[]>(() => loadList<Task>(TASKS_KEY));
+  const [examEvents, setExamEvents] = useState<ExamEvent[]>(() => loadList<ExamEvent>(EXAMS_KEY));
+  const [focusSessions, setFocusSessions] = useState<FocusSession[]>(() => loadList<FocusSession>(FOCUS_KEY));
+  const [notes, setNotes] = useState<Note[]>(() => loadList<Note>(NOTES_KEY));
+  const [goals, setGoals] = useState<Goal[]>(() => loadList<Goal>(GOALS_KEY));
+  const [settings, setSettings] = useState<Settings>(() => loadObj<Settings>(SETTINGS_KEY, {}));
   const [syncing, setSyncing] = useState(false);
 
   const tasksRef = useRef(tasks); tasksRef.current = tasks;
   const examsRef = useRef(examEvents); examsRef.current = examEvents;
   const focusRef = useRef(focusSessions); focusRef.current = focusSessions;
-  const lastSyncedRef = useRef<string>('');       // JSON we last wrote/received
+  const notesRef = useRef(notes); notesRef.current = notes;
+  const goalsRef = useRef(goals); goalsRef.current = goals;
+  const settingsRef = useRef(settings); settingsRef.current = settings;
+  const lastSyncedRef = useRef<string>('');
   const initializedUidRef = useRef<string | null>(null);
   const writeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -108,36 +115,35 @@ export function useTasks(user?: User | null) {
     const ref = doc(db, 'users', user.uid);
     setSyncing(true);
     const unsub = onSnapshot(ref, snap => {
+      const data: any = snap.exists() ? snap.data() : {};
       if (initializedUidRef.current !== user.uid) {
-        // First snapshot for this user: merge whatever is local with the cloud
-        // once, so signing in never loses local data.
+        // First snapshot for this user: merge local with cloud once (no data loss).
         initializedUidRef.current = user.uid;
-        const rTasks: Task[] = snap.exists() ? (snap.data().tasks || []) : [];
-        const rExams: ExamEvent[] = snap.exists() ? (snap.data().examEvents || []) : [];
-        const rFocus: FocusSession[] = snap.exists() ? (snap.data().focusSessions || []) : [];
-        const mergedTasks = sortByCreated(unionById(rTasks, tasksRef.current));
-        const mergedExams = unionById(rExams, examsRef.current);
-        const mergedFocus = unionById(rFocus, focusRef.current);
-        lastSyncedRef.current = JSON.stringify({ tasks: mergedTasks, examEvents: mergedExams, focusSessions: mergedFocus });
-        setTasks(mergedTasks);
-        setExamEvents(mergedExams);
-        setFocusSessions(mergedFocus);
-        setDoc(ref, { tasks: mergedTasks, examEvents: mergedExams, focusSessions: mergedFocus, updatedAt: Date.now() }, { merge: true })
+        const mTasks = sortByCreated(unionById(data.tasks || [], tasksRef.current));
+        const mExams = unionById(data.examEvents || [], examsRef.current);
+        const mFocus = unionById(data.focusSessions || [], focusRef.current);
+        const mNotes = unionById(data.notes || [], notesRef.current);
+        const mGoals = unionById(data.goals || [], goalsRef.current);
+        const mSettings = { ...settingsRef.current, ...(data.settings || {}) };
+        lastSyncedRef.current = JSON.stringify({ tasks: mTasks, examEvents: mExams, focusSessions: mFocus, notes: mNotes, goals: mGoals, settings: mSettings });
+        setTasks(mTasks); setExamEvents(mExams); setFocusSessions(mFocus); setNotes(mNotes); setGoals(mGoals); setSettings(mSettings);
+        setDoc(ref, { tasks: mTasks, examEvents: mExams, focusSessions: mFocus, notes: mNotes, goals: mGoals, settings: mSettings, updatedAt: Date.now() }, { merge: true })
           .catch(err => console.error('Sync seed failed:', err));
       } else {
-        // Later updates: the cloud is the source of truth. Skip our own echoes.
         if (snap.metadata.hasPendingWrites) return;
         const remote = {
-          tasks: (snap.data()?.tasks || []) as Task[],
-          examEvents: (snap.data()?.examEvents || []) as ExamEvent[],
-          focusSessions: (snap.data()?.focusSessions || []) as FocusSession[],
+          tasks: (data.tasks || []) as Task[],
+          examEvents: (data.examEvents || []) as ExamEvent[],
+          focusSessions: (data.focusSessions || []) as FocusSession[],
+          notes: (data.notes || []) as Note[],
+          goals: (data.goals || []) as Goal[],
+          settings: (data.settings || {}) as Settings,
         };
         const payload = JSON.stringify(remote);
         if (payload === lastSyncedRef.current) return;
         lastSyncedRef.current = payload;
-        setTasks(remote.tasks);
-        setExamEvents(remote.examEvents);
-        setFocusSessions(remote.focusSessions);
+        setTasks(remote.tasks); setExamEvents(remote.examEvents); setFocusSessions(remote.focusSessions);
+        setNotes(remote.notes); setGoals(remote.goals); setSettings(remote.settings);
       }
       setSyncing(false);
     }, err => { console.error('Sync error:', err); setSyncing(false); });
@@ -145,26 +151,28 @@ export function useTasks(user?: User | null) {
     return () => unsub();
   }, [user, configured]);
 
-  // Persist: always cache to localStorage; when signed in, debounce-write to the
-  // cloud. Skips writes that merely echo a value we just synced (loop guard).
+  // Persist: always cache to localStorage; when signed in, debounce-write to cloud.
   useEffect(() => {
     localStorage.setItem(TASKS_KEY, JSON.stringify(tasks));
     localStorage.setItem(EXAMS_KEY, JSON.stringify(examEvents));
     localStorage.setItem(FOCUS_KEY, JSON.stringify(focusSessions));
+    localStorage.setItem(NOTES_KEY, JSON.stringify(notes));
+    localStorage.setItem(GOALS_KEY, JSON.stringify(goals));
+    localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
 
     if (!user || !configured || !db) return;
-    if (initializedUidRef.current !== user.uid) return; // wait for initial merge
+    if (initializedUidRef.current !== user.uid) return;
 
-    const payload = JSON.stringify({ tasks, examEvents, focusSessions });
+    const payload = JSON.stringify({ tasks, examEvents, focusSessions, notes, goals, settings });
     if (payload === lastSyncedRef.current) return;
     lastSyncedRef.current = payload;
 
     if (writeTimer.current) clearTimeout(writeTimer.current);
     writeTimer.current = setTimeout(() => {
-      setDoc(doc(db!, 'users', user.uid), { tasks, examEvents, focusSessions, updatedAt: Date.now() }, { merge: true })
+      setDoc(doc(db!, 'users', user.uid), { tasks, examEvents, focusSessions, notes, goals, settings, updatedAt: Date.now() }, { merge: true })
         .catch(err => console.error('Sync write failed:', err));
     }, 500);
-  }, [tasks, examEvents, focusSessions, user, configured]);
+  }, [tasks, examEvents, focusSessions, notes, goals, settings, user, configured]);
 
   const createTask = useCallback((input: NewTaskInput): Task => {
     const newTask: Task = {
@@ -180,6 +188,7 @@ export function useTasks(user?: User | null) {
       youtubeVideoId: input.youtubeVideoId,
       priority: input.priority,
       tags: input.tags && input.tags.length ? input.tags : undefined,
+      remindAt: input.remindAt,
     };
     setTasks(prev => [newTask, ...prev]);
     return newTask;
@@ -193,35 +202,47 @@ export function useTasks(user?: User | null) {
     ));
   }, []);
 
-  const deleteTask = useCallback((id: string) => {
-    setTasks(prev => prev.filter(t => t.id !== id));
-  }, []);
-
-  const updateTask = useCallback((id: string, patch: Partial<Task>) => {
-    setTasks(prev => prev.map(t => (t.id === id ? { ...t, ...patch } : t)));
-  }, []);
+  const deleteTask = useCallback((id: string) => setTasks(prev => prev.filter(t => t.id !== id)), []);
+  const updateTask = useCallback((id: string, patch: Partial<Task>) =>
+    setTasks(prev => prev.map(t => (t.id === id ? { ...t, ...patch } : t))), []);
 
   const pinExam = useCallback((title: string, date: string, color: string) => {
     setExamEvents(prev => [...prev.filter(e => e.date !== date), { id: uuidv4(), title, date, color }]);
   }, []);
 
   const addFocusSession = useCallback((minutes: number, taskId?: string, label?: string) => {
-    setFocusSessions(prev => [
-      { id: uuidv4(), date: new Date().toISOString(), minutes, taskId, label },
-      ...prev,
-    ]);
+    setFocusSessions(prev => [{ id: uuidv4(), date: new Date().toISOString(), minutes, taskId, label }, ...prev]);
   }, []);
 
+  // Notes
+  const addNote = useCallback((): Note => {
+    const note: Note = { id: uuidv4(), title: '', content: '', updatedAt: new Date().toISOString() };
+    setNotes(prev => [note, ...prev]);
+    return note;
+  }, []);
+  const updateNote = useCallback((id: string, patch: Partial<Note>) =>
+    setNotes(prev => prev.map(n => (n.id === id ? { ...n, ...patch, updatedAt: new Date().toISOString() } : n))), []);
+  const deleteNote = useCallback((id: string) => setNotes(prev => prev.filter(n => n.id !== id)), []);
+
+  // Goals
+  const addGoal = useCallback((title: string, description?: string, targetDate?: string): Goal => {
+    const goal: Goal = { id: uuidv4(), title, description, targetDate, milestones: [], createdAt: new Date().toISOString() };
+    setGoals(prev => [goal, ...prev]);
+    return goal;
+  }, []);
+  const updateGoal = useCallback((id: string, patch: Partial<Goal>) =>
+    setGoals(prev => prev.map(g => (g.id === id ? { ...g, ...patch } : g))), []);
+  const deleteGoal = useCallback((id: string) => setGoals(prev => prev.filter(g => g.id !== id)), []);
+
+  const updateSettings = useCallback((patch: Partial<Settings>) =>
+    setSettings(prev => ({ ...prev, ...patch })), []);
+
   return {
-    tasks,
-    examEvents,
-    focusSessions,
-    createTask,
-    toggleTask,
-    deleteTask,
-    updateTask,
-    pinExam,
-    addFocusSession,
+    tasks, examEvents, focusSessions, notes, goals, settings,
+    createTask, toggleTask, deleteTask, updateTask, pinExam, addFocusSession,
+    addNote, updateNote, deleteNote,
+    addGoal, updateGoal, deleteGoal,
+    updateSettings,
     syncing,
   };
 }

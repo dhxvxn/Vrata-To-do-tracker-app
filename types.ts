@@ -40,6 +40,29 @@ export interface Task {
   tags?: string[];
   subtasks?: SubTask[];
   sets?: WorkoutSet[]; // Workout logging for FITNESS tasks
+  remindAt?: string; // ISO datetime for a client-side reminder
+}
+
+export interface Note {
+  id: string;
+  title: string;
+  content: string;
+  updatedAt: string;
+  tag?: string;
+}
+
+export interface Goal {
+  id: string;
+  title: string;
+  description?: string;
+  targetDate?: string; // YYYY-MM-DD
+  milestones: SubTask[];
+  createdAt: string;
+}
+
+export interface Settings {
+  githubUser?: string;
+  leetcodeUser?: string;
 }
 
 // A logged Pomodoro/focus block. Stored alongside tasks and synced.
@@ -80,4 +103,5 @@ export interface TaskExtras {
   youtubeUrl?: string;
   priority?: Priority;
   tags?: string[];
+  remindAt?: string;
 }
