@@ -18,7 +18,7 @@ export const requestPermission = async (): Promise<boolean> => {
 // reliable, works from a background tab), falling back to a page Notification.
 export const showNotification = async (title: string, body?: string): Promise<void> => {
   if (!isGranted()) return;
-  const options: NotificationOptions = { body, icon: '/icons/icon-192.png', badge: '/icons/icon-192.png' };
+  const options: NotificationOptions = { body };
   try {
     if ('serviceWorker' in navigator) {
       const reg = await navigator.serviceWorker.getRegistration();

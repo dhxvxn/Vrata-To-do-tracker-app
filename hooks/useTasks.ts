@@ -237,12 +237,25 @@ export function useTasks(user?: User | null) {
   const updateSettings = useCallback((patch: Partial<Settings>) =>
     setSettings(prev => ({ ...prev, ...patch })), []);
 
+  // Reset helpers (all sync via the persist effect when signed in).
+  const resetStreak = useCallback(() => {
+    setTasks(prev => prev.map(t => ({ ...t, completed: false, completedAt: undefined })));
+    setFocusSessions([]);
+    try { localStorage.removeItem('vrata_notified_reminders'); } catch { /* ignore */ }
+  }, []);
+  const resetTasks = useCallback(() => setTasks([]), []);
+  const resetAll = useCallback(() => {
+    setTasks([]); setExamEvents([]); setFocusSessions([]); setNotes([]); setGoals([]);
+    try { localStorage.removeItem('vrata_notified_reminders'); } catch { /* ignore */ }
+  }, []);
+
   return {
     tasks, examEvents, focusSessions, notes, goals, settings,
     createTask, toggleTask, deleteTask, updateTask, pinExam, addFocusSession,
     addNote, updateNote, deleteNote,
     addGoal, updateGoal, deleteGoal,
     updateSettings,
+    resetStreak, resetTasks, resetAll,
     syncing,
   };
 }

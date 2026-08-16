@@ -4,28 +4,32 @@
 
 # ✅ Vrata — Discipline Tracker
 
-A React + TypeScript productivity PWA: a task tracker, fitness/gym planner, exam
-calendar, YouTube study library, and (optionally) Google Calendar sync — usable
-on **phone and desktop with real-time sync between them**. It runs **100% free
-with no API keys**; a few optional keys unlock extras.
+A React + TypeScript productivity PWA: tasks, a fitness/gym planner, exam
+countdowns, a YouTube study library, a Pomodoro timer, streaks, notes, goals, an
+Indian festivals calendar, and a GitHub/LeetCode tracker — usable on **phone and
+desktop with real-time sync between them**, and **installable as an app**. It runs
+**100% free with no API keys**; a couple of optional keys unlock extras.
 
 ## ✨ Features
-- **Tasks with frequencies** — Daily, Weekly, Monthly, Exam, Fitness, Study
+- **Today dashboard** — a home screen with everything due today, your streak, focus
+  minutes and the soonest exam.
+- **Tasks with frequencies** — Daily, Weekly, Monthly, Exam, Fitness, Study — with
+  **priorities, tags, subtask checklists, search, and reminders**.
 - **Fitness/gym planner** — schedule runs (Tempo/Interval/Long/Easy) and gym days
-  (Upper Body / Lower Body / Core & Abs) across the week
-- **Exam calendar** — colour-coded exam events to plan study around
-- **Voice input** — tap the mic in the task box and just speak your task; the
-  browser's built-in speech-to-text fills it in. No key, no cost.
-- **YouTube study library** — save YouTube lectures as study tasks with a
-  thumbnail and an in-app player, and track what you've watched.
-- **Cross-device sync** *(optional)* — sign in with Google and your tasks sync in
-  real time between phone and desktop (Firebase Firestore).
-- **Google Calendar (two-way)** *(optional)* — see your schedule in the app and
-  push scheduled tasks/exams out as calendar events.
-- **Analytics, History & "Wrapped"** — completion charts, a completed log, and a
-  poetic period summary. Daily motivational quotes.
-- Quotes / insights / Wrapped are AI-written when a Gemini key is present, and
-  generated locally (keyless) otherwise.
+  (Upper/Lower/Core), and log **sets × reps × weight** per session.
+- **YouTube study library** — save lectures as study tasks with a thumbnail + in-app
+  player. Plus a **Pomodoro focus timer** that logs your focus minutes.
+- **Streaks, XP, badges & a contribution heatmap** to keep you consistent.
+- **Notes & Goals** — quick notes, and goals broken into milestones with a % bar.
+- **Indian holidays & festivals calendar** — a built-in month calendar + upcoming
+  festival countdowns (no setup).
+- **Coding tracker** — your GitHub contribution streak + LeetCode solved counts.
+- **Voice input** — tap the mic and speak your task (browser speech-to-text, no key).
+- **Cross-device sync** *(optional)* — sign in with Google; tasks sync in real time
+  between phone and desktop (Firebase Firestore).
+- **Installable PWA** — add it to your laptop & phone home screen; works offline.
+- Quotes / insights / "Wrapped" are AI-written with a Gemini key, or generated
+  locally (keyless) otherwise.
 
 ## 🛠 Tech Stack
 React · TypeScript · Vite · Web Speech API · Firebase (Firestore + Auth) ·
@@ -73,18 +77,32 @@ Sign in once with Google and your tasks follow you between phone and desktop.
 All Firebase web-config values are **public** and safe to ship. Without them, the
 app just stays local to each device.
 
-### 🗓️ Enable Google Calendar (two-way) — optional
+## 📲 Install as an app (free) — laptop & phone
 
-Only the **public** OAuth Client ID is used (no secret is shipped).
+Vrata is an installable PWA. Host it once for free, then install it on any device.
 
-1. [Google Cloud Console → Credentials](https://console.cloud.google.com/apis/credentials).
-2. Enable the **Google Calendar API**.
-3. Create an **OAuth 2.0 Client ID** (Web application).
-4. Under **Authorized JavaScript origins**, add `http://localhost:3000` (and your
-   deployed URL).
-5. Put the Client ID in `VITE_GOOGLE_CLIENT_ID` in `.env.local`.
+**1. Deploy (free, ~2 min):**
+1. Push this repo to GitHub (already done if you cloned it from there).
+2. Go to [vercel.com](https://vercel.com) → **Add New → Project** → import this repo.
+3. Vercel auto-detects **Vite** (Build `npm run build`, Output `dist`). Click
+   **Deploy**. You get a URL like `https://vrata-xxxx.vercel.app`.
 
-Without it, the Schedule tab shows a "not configured" note and sync buttons hide.
+   *(Netlify works the same way — connect the repo, it detects Vite.)*
+
+**2. Install on your devices:**
+- **Laptop (Chrome/Edge):** open the URL → click the **install icon** in the
+  address bar (or ⋮ menu → *Install Vrata*).
+- **Android (Chrome):** open the URL → ⋮ menu → **Add to Home screen / Install app**.
+- **iPhone (Safari):** open the URL → Share → **Add to Home Screen**.
+
+It then launches full-screen with its own icon and works offline.
+
+**3. Turn on sync for the hosted app (free):**
+- In your Vercel project → **Settings → Environment Variables**, add your
+  `VITE_FIREBASE_*` values (see the Firebase section above). Redeploy.
+- In the [Firebase Console](https://console.firebase.google.com/) →
+  **Authentication → Settings → Authorized domains**, add your `*.vercel.app`
+  domain so Google sign-in works on the hosted app.
 
 ### 🤖 AI quotes & insights (Gemini) — optional
 

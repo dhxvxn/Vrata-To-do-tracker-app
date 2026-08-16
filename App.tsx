@@ -47,6 +47,7 @@ import { CodingTracker } from './components/CodingTracker';
 import { NotesView } from './components/NotesView';
 import { GoalsView } from './components/GoalsView';
 import { TodayDashboard } from './components/TodayDashboard';
+import { ResetControl } from './components/ResetControl';
 import { getDailyQuote, generateWrappedReport } from './services/geminiService';
 import { useTasks } from './hooks/useTasks';
 import { useAuth } from './hooks/useAuth';
@@ -94,6 +95,9 @@ function App() {
     updateGoal,
     deleteGoal,
     updateSettings,
+    resetStreak,
+    resetTasks,
+    resetAll,
     syncing,
   } = useTasks(auth.user);
 
@@ -390,6 +394,7 @@ function App() {
               onSignIn={auth.signInWithGoogle}
               onSignOut={auth.signOut}
             />
+            <ResetControl onResetStreak={resetStreak} onResetTasks={resetTasks} onResetAll={resetAll} />
           </div>
         </div>
       </aside>
