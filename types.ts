@@ -41,6 +41,25 @@ export interface Task {
   subtasks?: SubTask[];
   sets?: WorkoutSet[]; // Workout logging for FITNESS tasks
   remindAt?: string; // ISO datetime for a client-side reminder
+  repeat?: RepeatCadence; // per-task recurrence (auto un-completes each period)
+}
+
+export type RepeatCadence = 'NONE' | 'DAILY' | 'WEEKLY' | 'MONTHLY';
+
+export interface GateVideo {
+  id: string;
+  title: string;
+  url: string;
+  videoId: string;
+  done: boolean;
+}
+
+export interface GateSubject {
+  id: string;
+  name: string;
+  videos: GateVideo[];
+  testsDone: number;
+  testsTarget: number;
 }
 
 export interface Note {
@@ -104,4 +123,5 @@ export interface TaskExtras {
   priority?: Priority;
   tags?: string[];
   remindAt?: string;
+  repeat?: RepeatCadence;
 }

@@ -26,7 +26,8 @@ import {
   Target,
   Code2,
   Bell,
-  PartyPopper
+  PartyPopper,
+  Repeat
 } from 'lucide-react';
 import { Task, TaskFrequency, FitnessType, Quote, TaskExtras, Priority, SubTask, WorkoutSet } from './types';
 import { TaskInput } from './components/TaskInput';
@@ -48,6 +49,7 @@ import { NotesView } from './components/NotesView';
 import { GoalsView } from './components/GoalsView';
 import { TodayDashboard } from './components/TodayDashboard';
 import { ResetControl } from './components/ResetControl';
+import { GateView } from './components/GateView';
 import { getDailyQuote, generateWrappedReport } from './services/geminiService';
 import { useTasks } from './hooks/useTasks';
 import { useAuth } from './hooks/useAuth';
@@ -95,6 +97,11 @@ function App() {
     updateGoal,
     deleteGoal,
     updateSettings,
+    gate,
+    addGateVideo,
+    toggleGateVideo,
+    deleteGateVideo,
+    setGateTests,
     resetStreak,
     resetTasks,
     resetAll,
@@ -117,6 +124,7 @@ function App() {
   const [showNotes, setShowNotes] = useState(false);
   const [showGoals, setShowGoals] = useState(false);
   const [showConnect, setShowConnect] = useState(false);
+  const [showGate, setShowGate] = useState(false);
   const [syncingId, setSyncingId] = useState<string | null>(null);
 
   const [fitnessEditorMode, setFitnessEditorMode] = useState<'NONE' | 'THIS_WEEK' | 'NEXT_WEEK'>('NONE');
@@ -149,7 +157,7 @@ function App() {
 
   const resetViews = (setter: () => void) => {
     setShowToday(false); setShowAnalytics(false); setShowHistory(false); setShowWrapped(false);
-    setShowCalendar(false); setShowNotes(false); setShowGoals(false); setShowConnect(false);
+    setShowCalendar(false); setShowNotes(false); setShowGoals(false); setShowConnect(false); setShowGate(false);
     setter();
   };
 
@@ -285,6 +293,11 @@ function App() {
                   <Bell size={8} /> {new Date(task.remindAt).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
                 </span>
               )}
+              {task.repeat && task.repeat !== 'NONE' && (
+                <span className="text-[8px] text-sky-400/80 uppercase tracking-widest flex items-center gap-1">
+                  <Repeat size={8} /> {task.repeat.toLowerCase()}
+                </span>
+              )}
               {task.completedAt && (
                 <span className="text-[8px] text-zinc-700 font-mono flex items-center gap-1">
                   <Clock size={8} /> {new Date(task.completedAt).toLocaleDateString()}
@@ -337,7 +350,7 @@ function App() {
     { id: TaskFrequency.STUDY, icon: BookOpen, label: 'Studies' }
   ];
 
-  const inTaskView = !showToday && !showAnalytics && !showHistory && !showWrapped && !showCalendar && !showNotes && !showGoals && !showConnect;
+  const inTaskView = !showToday && !showAnalytics && !showHistory && !showWrapped && !showCalendar && !showNotes && !showGoals && !showConnect && !showGate;
 
   return (
     <div className="min-h-screen bg-black text-textMain flex flex-col md:flex-row">
@@ -363,6 +376,12 @@ function App() {
             className={`flex items-center gap-3 px-4 py-3 rounded-lg text-sm font-medium transition-all ${showToday ? 'bg-white text-black' : 'text-textMuted hover:text-white hover:bg-surfaceHighlight'}`}
           >
             <Sun size={18} /> Today
+          </button>
+          <button
+            onClick={() => resetViews(() => setShowGate(true))}
+            className={`flex items-center gap-3 px-4 py-3 rounded-lg text-sm font-medium transition-all ${showGate ? 'bg-white text-black' : 'text-textMuted hover:text-white hover:bg-surfaceHighlight'}`}
+          >
+            <GraduationCap size={18} /> GATE
           </button>
           {sidebarTabs.map(tab => (
             <button
@@ -411,6 +430,7 @@ function App() {
           <div>
             <h2 className="text-3xl font-light text-white tracking-tight">
               {showToday ? 'Today'
+                : showGate ? 'GATE CSE Prep'
                 : showNotes ? 'Notes'
                 : showGoals ? 'Goals'
                 : showConnect ? 'Coding'
@@ -431,7 +451,9 @@ function App() {
         </header>
 
         {showToday ? (
-          <TodayDashboard tasks={tasks} examEvents={examEvents} focusSessions={focusSessions} streak={streak} xp={xp} onToggle={toggleTask} />
+          <TodayDashboard tasks={tasks} examEvents={examEvents} focusSessions={focusSessions} gate={gate} settings={settings} streak={streak} xp={xp} onToggle={toggleTask} />
+        ) : showGate ? (
+          <GateView gate={gate} onAddVideo={addGateVideo} onToggleVideo={toggleGateVideo} onDeleteVideo={deleteGateVideo} onSetTests={setGateTests} />
         ) : showConnect ? (
           <CodingTracker settings={settings} onUpdateSettings={updateSettings} />
         ) : showNotes ? (

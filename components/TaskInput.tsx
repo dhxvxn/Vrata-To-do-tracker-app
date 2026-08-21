@@ -1,7 +1,14 @@
 
 import React, { useMemo, useRef, useState } from 'react';
-import { Plus, AlignLeft, Youtube, Mic, X, Bell } from 'lucide-react';
-import { TaskFrequency, TaskExtras, Priority } from '../types';
+import { Plus, AlignLeft, Youtube, Mic, X, Bell, Repeat } from 'lucide-react';
+import { TaskFrequency, TaskExtras, Priority, RepeatCadence } from '../types';
+
+const REPEATS: { value: RepeatCadence; label: string }[] = [
+  { value: 'NONE', label: 'Once' },
+  { value: 'DAILY', label: 'Daily' },
+  { value: 'WEEKLY', label: 'Weekly' },
+  { value: 'MONTHLY', label: 'Monthly' },
+];
 import { parseYouTubeId } from '../utils/youtube';
 import { createRecognition, isSpeechRecognitionSupported, RecognitionController } from '../services/voiceService';
 import { requestPermission, notificationsSupported } from '../services/notificationService';
@@ -27,6 +34,8 @@ export const TaskInput: React.FC<TaskInputProps> = ({ onAdd, selectedFrequency }
   const [tagInput, setTagInput] = useState('');
   const [remindAt, setRemindAt] = useState('');
   const [showReminder, setShowReminder] = useState(false);
+  const [repeat, setRepeat] = useState<RepeatCadence>('NONE');
+  const [showRepeat, setShowRepeat] = useState(false);
   const [listening, setListening] = useState(false);
   const controllerRef = useRef<RecognitionController | null>(null);
   const voiceSupportedReminders = notificationsSupported();
@@ -62,6 +71,7 @@ export const TaskInput: React.FC<TaskInputProps> = ({ onAdd, selectedFrequency }
       ...(priority ? { priority } : {}),
       ...(tags.length ? { tags } : {}),
       ...(remindAt ? { remindAt: new Date(remindAt).toISOString() } : {}),
+      ...(repeat !== 'NONE' ? { repeat } : {}),
     };
     onAdd(text, selectedFrequency, details.trim() || undefined, Object.keys(extras).length ? extras : undefined);
     setText('');
@@ -72,6 +82,8 @@ export const TaskInput: React.FC<TaskInputProps> = ({ onAdd, selectedFrequency }
     setTagInput('');
     setRemindAt('');
     setShowReminder(false);
+    setRepeat('NONE');
+    setShowRepeat(false);
     if (selectedFrequency !== TaskFrequency.FITNESS) setShowDetails(false);
   };
 
@@ -130,6 +142,15 @@ export const TaskInput: React.FC<TaskInputProps> = ({ onAdd, selectedFrequency }
             <Bell size={18} />
           </button>
         )}
+
+        <button
+          type="button"
+          onClick={() => setShowRepeat(v => !v)}
+          className={`p-3 transition-colors ${showRepeat || repeat !== 'NONE' ? 'text-white' : 'text-zinc-600 hover:text-zinc-400'}`}
+          title="Repeat this task"
+        >
+          <Repeat size={18} />
+        </button>
 
         <button
           type="button"
@@ -201,6 +222,22 @@ export const TaskInput: React.FC<TaskInputProps> = ({ onAdd, selectedFrequency }
             className="bg-surface border border-border rounded-lg px-3 py-2 text-xs text-zinc-300 outline-none focus:border-textMuted"
           />
           {remindAt && <button type="button" onClick={() => setRemindAt('')} className="text-zinc-600 hover:text-red-400"><X size={14} /></button>}
+        </div>
+      )}
+
+      {showRepeat && (
+        <div className="animate-in slide-in-from-top-2 duration-300 flex items-center gap-2 flex-wrap">
+          <Repeat size={14} className="text-zinc-500" />
+          {REPEATS.map(r => (
+            <button
+              key={r.value}
+              type="button"
+              onClick={() => setRepeat(r.value)}
+              className={`px-2.5 py-1 rounded text-[11px] font-bold uppercase tracking-wider border transition-all ${repeat === r.value ? 'bg-white text-black border-white' : 'text-zinc-500 border-border hover:text-white'}`}
+            >
+              {r.label}
+            </button>
+          ))}
         </div>
       )}
 

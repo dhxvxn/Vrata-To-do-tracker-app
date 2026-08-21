@@ -2,8 +2,10 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { v4 as uuidv4 } from 'uuid';
 import type { User } from 'firebase/auth';
 import { doc, onSnapshot, setDoc } from 'firebase/firestore';
-import { Task, TaskFrequency, ExamEvent, FocusSession, Priority, Note, Goal, Settings } from '../types';
+import { Task, TaskFrequency, ExamEvent, FocusSession, Priority, Note, Goal, Settings, GateSubject, RepeatCadence } from '../types';
 import { db, isFirebaseConfigured } from '../services/firebase';
+import { DEFAULT_GATE_SUBJECTS } from '../utils/gate';
+import { parseYouTubeId } from '../utils/youtube';
 
 const TASKS_KEY = 'vrata_tasks';
 const EXAMS_KEY = 'vrata_exam_events';
@@ -11,6 +13,7 @@ const FOCUS_KEY = 'vrata_focus_sessions';
 const NOTES_KEY = 'vrata_notes';
 const GOALS_KEY = 'vrata_goals';
 const SETTINGS_KEY = 'vrata_settings';
+const GATE_KEY = 'vrata_gate';
 
 export interface NewTaskInput {
   title: string;
@@ -23,6 +26,7 @@ export interface NewTaskInput {
   priority?: Priority;
   tags?: string[];
   remindAt?: string;
+  repeat?: RepeatCadence;
 }
 
 const loadList = <T,>(key: string): T[] => {
@@ -56,6 +60,10 @@ export function useTasks(user?: User | null) {
   const [notes, setNotes] = useState<Note[]>(() => loadList<Note>(NOTES_KEY));
   const [goals, setGoals] = useState<Goal[]>(() => loadList<Goal>(GOALS_KEY));
   const [settings, setSettings] = useState<Settings>(() => loadObj<Settings>(SETTINGS_KEY, {}));
+  const [gate, setGate] = useState<GateSubject[]>(() => {
+    const saved = loadList<GateSubject>(GATE_KEY);
+    return saved.length ? saved : DEFAULT_GATE_SUBJECTS();
+  });
   const [syncing, setSyncing] = useState(false);
 
   const tasksRef = useRef(tasks); tasksRef.current = tasks;
@@ -64,6 +72,7 @@ export function useTasks(user?: User | null) {
   const notesRef = useRef(notes); notesRef.current = notes;
   const goalsRef = useRef(goals); goalsRef.current = goals;
   const settingsRef = useRef(settings); settingsRef.current = settings;
+  const gateRef = useRef(gate); gateRef.current = gate;
   const lastSyncedRef = useRef<string>('');
   const initializedUidRef = useRef<string | null>(null);
   const writeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -82,15 +91,24 @@ export function useTasks(user?: User | null) {
       let changed = false;
       const updated = prev.map(t => {
         const completedDate = t.completedAt ? new Date(t.completedAt) : null;
-        if (t.frequency === TaskFrequency.DAILY) {
+        // Effective cadence: an explicit per-task repeat, else the frequency tab
+        // (Daily/Weekly/Monthly) as before.
+        const cadence: RepeatCadence =
+          t.repeat && t.repeat !== 'NONE' ? t.repeat
+          : t.frequency === TaskFrequency.DAILY ? 'DAILY'
+          : t.frequency === TaskFrequency.WEEKLY ? 'WEEKLY'
+          : t.frequency === TaskFrequency.MONTHLY ? 'MONTHLY'
+          : 'NONE';
+
+        if (cadence === 'DAILY') {
           if (t.completed && completedDate && completedDate.toISOString().split('T')[0] !== todayStr) {
             changed = true; return { ...t, completed: false, completedAt: undefined };
           }
-        } else if (t.frequency === TaskFrequency.WEEKLY) {
+        } else if (cadence === 'WEEKLY') {
           if (t.completed && completedDate && completedDate < monday) {
             changed = true; return { ...t, completed: false, completedAt: undefined };
           }
-        } else if (t.frequency === TaskFrequency.MONTHLY) {
+        } else if (cadence === 'MONTHLY') {
           if (t.completed && completedDate && completedDate.getMonth() !== now.getMonth()) {
             changed = true; return { ...t, completed: false, completedAt: undefined };
           }
@@ -125,9 +143,10 @@ export function useTasks(user?: User | null) {
         const mNotes = unionById(data.notes || [], notesRef.current);
         const mGoals = unionById(data.goals || [], goalsRef.current);
         const mSettings = { ...settingsRef.current, ...(data.settings || {}) };
-        lastSyncedRef.current = JSON.stringify({ tasks: mTasks, examEvents: mExams, focusSessions: mFocus, notes: mNotes, goals: mGoals, settings: mSettings });
-        setTasks(mTasks); setExamEvents(mExams); setFocusSessions(mFocus); setNotes(mNotes); setGoals(mGoals); setSettings(mSettings);
-        setDoc(ref, { tasks: mTasks, examEvents: mExams, focusSessions: mFocus, notes: mNotes, goals: mGoals, settings: mSettings, updatedAt: Date.now() }, { merge: true })
+        const mGate = unionById(data.gate || [], gateRef.current);
+        lastSyncedRef.current = JSON.stringify({ tasks: mTasks, examEvents: mExams, focusSessions: mFocus, notes: mNotes, goals: mGoals, settings: mSettings, gate: mGate });
+        setTasks(mTasks); setExamEvents(mExams); setFocusSessions(mFocus); setNotes(mNotes); setGoals(mGoals); setSettings(mSettings); setGate(mGate);
+        setDoc(ref, { tasks: mTasks, examEvents: mExams, focusSessions: mFocus, notes: mNotes, goals: mGoals, settings: mSettings, gate: mGate, updatedAt: Date.now() }, { merge: true })
           .catch(err => console.error('Sync seed failed:', err));
       } else {
         if (snap.metadata.hasPendingWrites) return;
@@ -138,12 +157,13 @@ export function useTasks(user?: User | null) {
           notes: (data.notes || []) as Note[],
           goals: (data.goals || []) as Goal[],
           settings: (data.settings || {}) as Settings,
+          gate: (data.gate && data.gate.length ? data.gate : gateRef.current) as GateSubject[],
         };
         const payload = JSON.stringify(remote);
         if (payload === lastSyncedRef.current) return;
         lastSyncedRef.current = payload;
         setTasks(remote.tasks); setExamEvents(remote.examEvents); setFocusSessions(remote.focusSessions);
-        setNotes(remote.notes); setGoals(remote.goals); setSettings(remote.settings);
+        setNotes(remote.notes); setGoals(remote.goals); setSettings(remote.settings); setGate(remote.gate);
       }
       setSyncing(false);
     }, err => { console.error('Sync error:', err); setSyncing(false); });
@@ -159,20 +179,21 @@ export function useTasks(user?: User | null) {
     localStorage.setItem(NOTES_KEY, JSON.stringify(notes));
     localStorage.setItem(GOALS_KEY, JSON.stringify(goals));
     localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
+    localStorage.setItem(GATE_KEY, JSON.stringify(gate));
 
     if (!user || !configured || !db) return;
     if (initializedUidRef.current !== user.uid) return;
 
-    const payload = JSON.stringify({ tasks, examEvents, focusSessions, notes, goals, settings });
+    const payload = JSON.stringify({ tasks, examEvents, focusSessions, notes, goals, settings, gate });
     if (payload === lastSyncedRef.current) return;
     lastSyncedRef.current = payload;
 
     if (writeTimer.current) clearTimeout(writeTimer.current);
     writeTimer.current = setTimeout(() => {
-      setDoc(doc(db!, 'users', user.uid), { tasks, examEvents, focusSessions, notes, goals, settings, updatedAt: Date.now() }, { merge: true })
+      setDoc(doc(db!, 'users', user.uid), { tasks, examEvents, focusSessions, notes, goals, settings, gate, updatedAt: Date.now() }, { merge: true })
         .catch(err => console.error('Sync write failed:', err));
     }, 500);
-  }, [tasks, examEvents, focusSessions, notes, goals, settings, user, configured]);
+  }, [tasks, examEvents, focusSessions, notes, goals, settings, gate, user, configured]);
 
   const createTask = useCallback((input: NewTaskInput): Task => {
     const newTask: Task = {
@@ -189,6 +210,7 @@ export function useTasks(user?: User | null) {
       priority: input.priority,
       tags: input.tags && input.tags.length ? input.tags : undefined,
       remindAt: input.remindAt,
+      repeat: input.repeat && input.repeat !== 'NONE' ? input.repeat : undefined,
     };
     setTasks(prev => [newTask, ...prev]);
     return newTask;
@@ -237,6 +259,35 @@ export function useTasks(user?: User | null) {
   const updateSettings = useCallback((patch: Partial<Settings>) =>
     setSettings(prev => ({ ...prev, ...patch })), []);
 
+  // GATE prep
+  const addGateVideo = useCallback((subjectId: string, url: string, title?: string) => {
+    const videoId = parseYouTubeId(url);
+    if (!videoId) return false;
+    setGate(prev => prev.map(s => s.id === subjectId
+      ? { ...s, videos: [...s.videos, { id: uuidv4(), title: title?.trim() || 'Video', url: url.trim(), videoId, done: false }] }
+      : s));
+    return true;
+  }, []);
+  const toggleGateVideo = useCallback((subjectId: string, videoId: string) => {
+    setGate(prev => prev.map(s => s.id === subjectId
+      ? { ...s, videos: s.videos.map(v => v.id === videoId ? { ...v, done: !v.done } : v) }
+      : s));
+  }, []);
+  const deleteGateVideo = useCallback((subjectId: string, videoId: string) => {
+    setGate(prev => prev.map(s => s.id === subjectId
+      ? { ...s, videos: s.videos.filter(v => v.id !== videoId) }
+      : s));
+  }, []);
+  const setGateTests = useCallback((subjectId: string, patch: { testsDone?: number; testsTarget?: number }) => {
+    setGate(prev => prev.map(s => s.id === subjectId
+      ? {
+          ...s,
+          testsDone: Math.max(0, patch.testsDone ?? s.testsDone),
+          testsTarget: Math.max(1, patch.testsTarget ?? s.testsTarget),
+        }
+      : s));
+  }, []);
+
   // Reset helpers (all sync via the persist effect when signed in).
   const resetStreak = useCallback(() => {
     setTasks(prev => prev.map(t => ({ ...t, completed: false, completedAt: undefined })));
@@ -250,11 +301,12 @@ export function useTasks(user?: User | null) {
   }, []);
 
   return {
-    tasks, examEvents, focusSessions, notes, goals, settings,
+    tasks, examEvents, focusSessions, notes, goals, settings, gate,
     createTask, toggleTask, deleteTask, updateTask, pinExam, addFocusSession,
     addNote, updateNote, deleteNote,
     addGoal, updateGoal, deleteGoal,
     updateSettings,
+    addGateVideo, toggleGateVideo, deleteGateVideo, setGateTests,
     resetStreak, resetTasks, resetAll,
     syncing,
   };
