@@ -51,7 +51,7 @@ const SubjectRow: React.FC<{ subject: GateSubject } & Omit<GateViewProps, 'gate'
       {open && (
         <div className="mt-4 space-y-3 animate-in slide-in-from-top-2 duration-200">
           {/* Tests controls */}
-          <div className="flex items-center gap-3 text-xs text-zinc-400">
+          <div className="flex items-center gap-3 text-xs text-zinc-400 flex-wrap">
             <Trophy size={13} className="text-purple-400" />
             <span>Mock tests</span>
             <button onClick={() => onSetTests(s.id, { testsDone: s.testsDone - 1 })} className="p-1 rounded bg-surfaceHighlight hover:text-white"><Minus size={12} /></button>

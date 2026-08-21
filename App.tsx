@@ -27,7 +27,9 @@ import {
   Code2,
   Bell,
   PartyPopper,
-  Repeat
+  Repeat,
+  Menu,
+  X
 } from 'lucide-react';
 import { Task, TaskFrequency, FitnessType, Quote, TaskExtras, Priority, SubTask, WorkoutSet } from './types';
 import { TaskInput } from './components/TaskInput';
@@ -125,6 +127,7 @@ function App() {
   const [showGoals, setShowGoals] = useState(false);
   const [showConnect, setShowConnect] = useState(false);
   const [showGate, setShowGate] = useState(false);
+  const [sidebarOpen, setSidebarOpen] = useState(false); // mobile nav drawer
   const [syncingId, setSyncingId] = useState<string | null>(null);
 
   const [fitnessEditorMode, setFitnessEditorMode] = useState<'NONE' | 'THIS_WEEK' | 'NEXT_WEEK'>('NONE');
@@ -158,6 +161,7 @@ function App() {
   const resetViews = (setter: () => void) => {
     setShowToday(false); setShowAnalytics(false); setShowHistory(false); setShowWrapped(false);
     setShowCalendar(false); setShowNotes(false); setShowGoals(false); setShowConnect(false); setShowGate(false);
+    setSidebarOpen(false); // close the mobile drawer on any navigation
     setter();
   };
 
@@ -314,14 +318,14 @@ function App() {
               <button
                 onClick={() => handleSyncTask(task)}
                 disabled={syncingId === task.id}
-                className="text-zinc-600 hover:text-white opacity-0 group-hover:opacity-100 p-2 disabled:opacity-40"
+                className="text-zinc-600 hover:text-white opacity-100 md:opacity-0 md:group-hover:opacity-100 p-2 disabled:opacity-40"
                 title="Add to Google Calendar"
               >
                 {syncingId === task.id ? <Loader2 size={16} className="animate-spin" /> : <CalendarPlus size={16} />}
               </button>
             )
           )}
-          <button onClick={() => deleteTask(task.id)} className="text-zinc-600 hover:text-red-400 opacity-0 group-hover:opacity-100 p-2"><Trash2 size={16} /></button>
+          <button onClick={() => deleteTask(task.id)} className="text-zinc-600 hover:text-red-400 opacity-100 md:opacity-0 md:group-hover:opacity-100 p-2"><Trash2 size={16} /></button>
         </div>
       </div>
       {task.details && !task.completed && (
@@ -354,12 +358,30 @@ function App() {
 
   return (
     <div className="min-h-screen bg-black text-textMain flex flex-col md:flex-row">
-      <aside className="w-full md:w-64 border-b md:border-b-0 md:border-r border-border p-6 flex flex-col gap-8">
-        <div className="flex items-center gap-3 px-2">
-          <div className="w-8 h-8 bg-white rounded-md flex items-center justify-center text-black">
-            <Flame size={20} fill="black" />
+      {/* Mobile top bar */}
+      <header className="md:hidden sticky top-0 z-30 flex items-center justify-between px-4 py-3 border-b border-border bg-black/90 backdrop-blur">
+        <button onClick={() => setSidebarOpen(true)} className="p-2 -ml-2 text-zinc-300 hover:text-white" aria-label="Menu"><Menu size={22} /></button>
+        <div className="flex items-center gap-2">
+          <div className="w-6 h-6 bg-white rounded flex items-center justify-center text-black"><Flame size={14} fill="black" /></div>
+          <span className="font-bold tracking-tight">VRATA</span>
+        </div>
+        <div className="flex items-center gap-1 text-sm font-semibold" style={{ color: streak > 0 ? '#fb923c' : '#52525b' }}>
+          <Flame size={14} fill={streak > 0 ? '#fb923c' : 'none'} />{streak}
+        </div>
+      </header>
+
+      {/* Mobile drawer backdrop */}
+      {sidebarOpen && <div className="md:hidden fixed inset-0 bg-black/60 z-40" onClick={() => setSidebarOpen(false)} />}
+
+      <aside className={`fixed md:static inset-y-0 left-0 z-50 w-72 md:w-64 max-w-[85%] bg-black md:border-r border-border p-6 flex flex-col gap-6 md:gap-8 overflow-y-auto transform transition-transform duration-300 md:translate-x-0 ${sidebarOpen ? 'translate-x-0' : '-translate-x-full'}`}>
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-3 px-2">
+            <div className="w-8 h-8 bg-white rounded-md flex items-center justify-center text-black">
+              <Flame size={20} fill="black" />
+            </div>
+            <h1 className="text-xl font-bold tracking-tight">VRATA</h1>
           </div>
-          <h1 className="text-xl font-bold tracking-tight">VRATA</h1>
+          <button onClick={() => setSidebarOpen(false)} className="md:hidden p-1 text-zinc-500 hover:text-white" aria-label="Close menu"><X size={20} /></button>
         </div>
         <div className="relative">
           <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-600" />
