@@ -1,12 +1,13 @@
 import React, { useState } from 'react';
-import { ChevronDown, ChevronRight, Plus, Trash2, CheckSquare, Square, Play, Minus, Trophy } from 'lucide-react';
+import { ChevronDown, ChevronRight, Plus, Trash2, CheckSquare, Square, Play, Minus, Trophy, Loader2 } from 'lucide-react';
 import { GateSubject } from '../types';
 import { coverage, testProgress } from '../utils/gate';
-import { thumbnailUrl, watchUrl } from '../utils/youtube';
+import { thumbnailUrl, watchUrl, parsePlaylistId } from '../utils/youtube';
 
 interface GateViewProps {
   gate: GateSubject[];
   onAddVideo: (subjectId: string, url: string) => boolean;
+  onAddPlaylist: (subjectId: string, url: string) => Promise<{ added: number }>;
   onToggleVideo: (subjectId: string, videoId: string) => void;
   onDeleteVideo: (subjectId: string, videoId: string) => void;
   onSetTests: (subjectId: string, patch: { testsDone?: number; testsTarget?: number }) => void;
@@ -23,16 +24,30 @@ const Bar: React.FC<{ label: string; value: number; color: string; text: string 
   </div>
 );
 
-const SubjectRow: React.FC<{ subject: GateSubject } & Omit<GateViewProps, 'gate'>> = ({ subject: s, onAddVideo, onToggleVideo, onDeleteVideo, onSetTests }) => {
+const SubjectRow: React.FC<{ subject: GateSubject } & Omit<GateViewProps, 'gate'>> = ({ subject: s, onAddVideo, onAddPlaylist, onToggleVideo, onDeleteVideo, onSetTests }) => {
   const [open, setOpen] = useState(false);
   const [url, setUrl] = useState('');
   const [err, setErr] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState<string | null>(null);
   const watched = s.videos.filter(v => v.done).length;
 
-  const add = () => {
-    if (!url.trim()) return;
-    const ok = onAddVideo(s.id, url);
-    if (ok) { setUrl(''); setErr(false); } else setErr(true);
+  const add = async () => {
+    const u = url.trim();
+    if (!u || busy) return;
+    if (parsePlaylistId(u)) {
+      setBusy(true); setErr(false); setMsg('Importing playlist…');
+      try {
+        const { added } = await onAddPlaylist(s.id, u);
+        setUrl('');
+        setMsg(added ? `Added ${added} video${added === 1 ? '' : 's'}.` : 'Those videos are already in the list.');
+      } catch (e: any) {
+        setErr(true); setMsg(e?.message || 'Failed to import playlist.');
+      } finally { setBusy(false); }
+    } else {
+      const ok = onAddVideo(s.id, u);
+      if (ok) { setUrl(''); setErr(false); setMsg(null); } else { setErr(true); setMsg(null); }
+    }
   };
 
   return (
@@ -80,18 +95,21 @@ const SubjectRow: React.FC<{ subject: GateSubject } & Omit<GateViewProps, 'gate'
             ))}
           </div>
 
-          {/* Add video */}
+          {/* Add video or playlist */}
           <div className="flex items-center gap-2">
             <input
               value={url}
-              onChange={e => { setUrl(e.target.value); setErr(false); }}
+              onChange={e => { setUrl(e.target.value); setErr(false); setMsg(null); }}
               onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); add(); } }}
-              placeholder="Paste a YouTube video link…"
-              className={`flex-1 bg-surfaceHighlight border rounded px-2 py-1.5 text-xs text-zinc-200 placeholder-zinc-600 outline-none ${err ? 'border-red-500/50' : 'border-border'}`}
+              placeholder="Paste a YouTube video or playlist link…"
+              disabled={busy}
+              className={`flex-1 bg-surfaceHighlight border rounded px-2 py-1.5 text-xs text-zinc-200 placeholder-zinc-600 outline-none disabled:opacity-50 ${err ? 'border-red-500/50' : 'border-border'}`}
             />
-            <button onClick={add} className="p-1.5 rounded bg-white text-black hover:bg-zinc-200"><Plus size={13} /></button>
+            <button onClick={add} disabled={busy} className="p-1.5 rounded bg-white text-black hover:bg-zinc-200 disabled:opacity-50">
+              {busy ? <Loader2 size={13} className="animate-spin" /> : <Plus size={13} />}
+            </button>
           </div>
-          {err && <p className="text-[10px] text-red-400">That doesn't look like a valid YouTube link.</p>}
+          {msg && <p className={`text-[10px] ${err ? 'text-red-400' : 'text-zinc-500'}`}>{msg}</p>}
         </div>
       )}
     </div>

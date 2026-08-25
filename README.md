@@ -24,6 +24,12 @@ desktop with real-time sync between them**, and **installable as an app**. It ru
 - **Indian holidays & festivals calendar** — a built-in month calendar + upcoming
   festival countdowns (no setup).
 - **Coding tracker** — your GitHub contribution streak + LeetCode solved counts.
+- **GATE CSE prep** — per-subject video coverage (paste a single link **or a whole
+  YouTube playlist**) and mock-test progress bars, with overall bars on Today.
+- **Priority-weighted XP** — High-priority tasks earn more points than Low ones.
+- **Vrata Focus browser extension** *(optional)* — a Chrome/Edge/Brave companion that
+  tracks your focus vs distractions and flags whether the YouTube videos you watch
+  are study-related. See [`extension/README.md`](extension/README.md).
 - **Voice input** — tap the mic and speak your task (browser speech-to-text, no key).
 - **Cross-device sync** *(optional)* — sign in with Google; tasks sync in real time
   between phone and desktop (Firebase Firestore).
@@ -110,6 +116,18 @@ Quotes, the productivity insight, and the "Wrapped" report are generated
 **locally by default** — no key needed. To have them written by AI instead, set a
 [Gemini API key](https://aistudio.google.com/apikey) as `GEMINI_API_KEY` in
 `.env.local`.
+
+### 🔎 Vrata Focus browser extension — optional
+
+A separate, self-contained companion extension (in the [`extension/`](extension/)
+folder) that watches your **browser** and shows a daily focus dashboard: productive
+vs distraction time, a focus score, top sites, and each YouTube video flagged
+**Study / Off-topic / GATE**. Productive = any genuine learning (any subject, AI/ML,
+programming, tutorials — not just GATE). All data stays local in your browser.
+
+Install (Chrome, Edge, or Brave): open `chrome://extensions` (or `edge://` /
+`brave://extensions`), turn on **Developer mode**, click **Load unpacked**, and
+select the `extension/` folder. Full steps: [`extension/README.md`](extension/README.md).
 
 ### 📜 Scripts
 ```bash

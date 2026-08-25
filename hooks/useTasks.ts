@@ -5,7 +5,8 @@ import { doc, onSnapshot, setDoc } from 'firebase/firestore';
 import { Task, TaskFrequency, ExamEvent, FocusSession, Priority, Note, Goal, Settings, GateSubject, RepeatCadence } from '../types';
 import { db, isFirebaseConfigured } from '../services/firebase';
 import { DEFAULT_GATE_SUBJECTS } from '../utils/gate';
-import { parseYouTubeId } from '../utils/youtube';
+import { parseYouTubeId, parsePlaylistId } from '../utils/youtube';
+import { fetchPlaylistVideos } from '../services/youtubePlaylist';
 
 const TASKS_KEY = 'vrata_tasks';
 const EXAMS_KEY = 'vrata_exam_events';
@@ -268,6 +269,21 @@ export function useTasks(user?: User | null) {
       : s));
     return true;
   }, []);
+  // Import a whole YouTube playlist into a subject (dedupe by videoId).
+  const addGatePlaylist = useCallback(async (subjectId: string, url: string): Promise<{ added: number }> => {
+    const pid = parsePlaylistId(url);
+    if (!pid) throw new Error('That is not a playlist link.');
+    const vids = await fetchPlaylistVideos(pid);
+    const subj = gateRef.current.find(s => s.id === subjectId);
+    const existing = new Set((subj?.videos || []).map(v => v.videoId));
+    const toAdd = vids.filter(v => !existing.has(v.videoId));
+    if (toAdd.length) {
+      setGate(prev => prev.map(s => s.id === subjectId
+        ? { ...s, videos: [...s.videos, ...toAdd.map(v => ({ id: uuidv4(), title: v.title, url: `https://www.youtube.com/watch?v=${v.videoId}`, videoId: v.videoId, done: false }))] }
+        : s));
+    }
+    return { added: toAdd.length };
+  }, []);
   const toggleGateVideo = useCallback((subjectId: string, videoId: string) => {
     setGate(prev => prev.map(s => s.id === subjectId
       ? { ...s, videos: s.videos.map(v => v.id === videoId ? { ...v, done: !v.done } : v) }
@@ -306,7 +322,7 @@ export function useTasks(user?: User | null) {
     addNote, updateNote, deleteNote,
     addGoal, updateGoal, deleteGoal,
     updateSettings,
-    addGateVideo, toggleGateVideo, deleteGateVideo, setGateTests,
+    addGateVideo, addGatePlaylist, toggleGateVideo, deleteGateVideo, setGateTests,
     resetStreak, resetTasks, resetAll,
     syncing,
   };

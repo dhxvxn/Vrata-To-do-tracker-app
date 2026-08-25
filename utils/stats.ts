@@ -1,7 +1,7 @@
 // Derived gamification + heatmap stats. Everything here is computed from the
 // tasks' completion history, so nothing new needs to be stored or synced.
 
-import { Task } from '../types';
+import { Task, Priority } from '../types';
 
 const dayKey = (d: Date): string => d.toISOString().split('T')[0];
 
@@ -40,9 +40,12 @@ export interface XPState {
   forNextLevel: number; // XP needed to fill the current level
 }
 
-// 10 XP per completed task; each level costs 100 XP.
+// XP is weighted by priority — harder tasks are worth more. Each level costs 100 XP.
+export const priorityPoints = (p?: Priority): number =>
+  p === 'HIGH' ? 25 : p === 'MEDIUM' ? 15 : p === 'LOW' ? 8 : 10;
+
 export const computeXP = (tasks: Task[]): XPState => {
-  const xp = tasks.filter(t => t.completed).length * 10;
+  const xp = tasks.filter(t => t.completed).reduce((sum, t) => sum + priorityPoints(t.priority), 0);
   const forNextLevel = 100;
   const level = Math.floor(xp / forNextLevel) + 1;
   const intoLevel = xp % forNextLevel;

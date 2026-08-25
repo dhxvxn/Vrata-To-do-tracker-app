@@ -1,0 +1,43 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <style>
+    * { box-sizing: border-box; font-family: -apple-system, Segoe UI, Roboto, sans-serif; }
+    body { max-width: 640px; margin: 0 auto; background: #000; color: #fafafa; padding: 32px 24px; }
+    h1 { font-size: 20px; font-weight: 300; margin-bottom: 4px; }
+    p.sub { color: #71717a; font-size: 13px; margin-bottom: 24px; }
+    label { display: block; font-size: 11px; text-transform: uppercase; letter-spacing: .12em; color: #a1a1aa; margin: 18px 0 6px; }
+    textarea { width: 100%; min-height: 90px; background: #09090b; border: 1px solid #27272a; border-radius: 8px; color: #e4e4e7; padding: 10px 12px; font-size: 13px; resize: vertical; outline: none; }
+    textarea:focus { border-color: #52525b; }
+    .hint { font-size: 11px; color: #52525b; margin-top: 4px; }
+    button { margin-top: 22px; background: #fff; color: #000; border: none; border-radius: 8px; padding: 10px 20px; font-weight: 700; font-size: 13px; cursor: pointer; }
+    button:hover { background: #d4d4d8; }
+    .saved { color: #22c55e; font-size: 13px; margin-left: 12px; }
+  </style>
+</head>
+<body>
+  <h1>Vrata Focus — settings</h1>
+  <p class="sub">One item per line (or comma-separated). Anything not listed counts as neutral.</p>
+
+  <label>Study / productive domains</label>
+  <textarea id="study"></textarea>
+  <div class="hint">Time on these counts as productive.</div>
+
+  <label>Distraction domains</label>
+  <textarea id="distraction"></textarea>
+  <div class="hint">Time on these counts as distraction.</div>
+
+  <label>Study keywords (for YouTube titles)</label>
+  <textarea id="keywords"></textarea>
+  <div class="hint">A YouTube video counts as productive if its title contains any of these (covers any subject, incl. AI).</div>
+
+  <div>
+    <button id="save">Save</button>
+    <span class="saved" id="saved" style="display:none">Saved ✓</span>
+  </div>
+
+  <script src="config.js"></script>
+  <script src="options.js"></script>
+</body>
+</html>

@@ -101,6 +101,7 @@ function App() {
     updateSettings,
     gate,
     addGateVideo,
+    addGatePlaylist,
     toggleGateVideo,
     deleteGateVideo,
     setGateTests,
@@ -475,7 +476,7 @@ function App() {
         {showToday ? (
           <TodayDashboard tasks={tasks} examEvents={examEvents} focusSessions={focusSessions} gate={gate} settings={settings} streak={streak} xp={xp} onToggle={toggleTask} />
         ) : showGate ? (
-          <GateView gate={gate} onAddVideo={addGateVideo} onToggleVideo={toggleGateVideo} onDeleteVideo={deleteGateVideo} onSetTests={setGateTests} />
+          <GateView gate={gate} onAddVideo={addGateVideo} onAddPlaylist={addGatePlaylist} onToggleVideo={toggleGateVideo} onDeleteVideo={deleteGateVideo} onSetTests={setGateTests} />
         ) : showConnect ? (
           <CodingTracker settings={settings} onUpdateSettings={updateSettings} />
         ) : showNotes ? (
